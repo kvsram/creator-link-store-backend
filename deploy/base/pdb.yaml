@@ -1,0 +1,7 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: creator-store-api
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app.kubernetes.io/name: creator-store-api } }

@@ -1,0 +1,11 @@
+resources:
+  - namespace.yaml
+  - service.yaml
+  - deployment.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - network-policy.yaml
+  - db-secret.template.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/name: creator-store-api

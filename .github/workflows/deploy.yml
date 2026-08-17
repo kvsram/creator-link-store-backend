@@ -1,0 +1,16 @@
+name: Deploy backend
+on:
+  workflow_dispatch:
+    inputs:
+      region: { type: choice, options: [region-a, region-b, region-c], required: true }
+      image_tag: { required: true, description: Git commit SHA to deploy }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.region }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > $HOME/.kube/config
+      - run: kubectl apply -k deploy/overlays/${{ inputs.region }}
+      - run: kubectl -n creator-store set image deployment/creator-store-api api=ghcr.io/${{ github.repository_owner }}/creator-link-store-backend:${{ inputs.image_tag }}
+      - run: kubectl -n creator-store rollout status deployment/creator-store-api --timeout=180s

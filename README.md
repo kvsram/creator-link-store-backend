@@ -8,3 +8,11 @@ mvn spring-boot:run
 ```
 
 It listens on port 8080 and its PostgreSQL schema is initialized from `src/main/resources/schema.sql`.
+
+## Regional Kubernetes deployment
+
+`deploy/overlays/region-a`, `region-b`, and `region-c` target three independent Kubernetes clusters. Each deploys one API replica initially, with an HPA that can grow to three replicas in that region. The application remains stateless; PostgreSQL is an external managed service, not a Pod in every cluster.
+
+Create the `creator-store-db` Secret in each cluster using its private managed-PostgreSQL endpoint. For the first low-scale phase, point all regions to one primary database in the closest region. Do not commit a real database password: replace the template with External Secrets or a cloud secret-manager integration.
+
+GitHub Actions builds an immutable GHCR image on every `main` push. To enable manual deploys, create GitHub Environments named `region-a`, `region-b`, and `region-c`, each with a base64-encoded `KUBECONFIG_B64` secret for only its cluster. Trigger **Deploy backend** with the image commit SHA.
