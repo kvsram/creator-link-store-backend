@@ -12,11 +12,17 @@ jobs:
         with: { distribution: temurin, java-version: '17', cache: maven }
       - run: mvn -B verify
       - uses: docker/login-action@v3
-        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/creator-link-store-backend:sha-${{ github.sha }}
       - uses: actions/upload-artifact@v4
-        with: { name: backend-jar-${{ github.sha }}, path: target/*.jar, retention-days: 30 }
+        with:
+          name: backend-jar-${{ github.sha }}
+          path: target/*.jar
+          retention-days: 30
