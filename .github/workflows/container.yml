@@ -1,17 +1,19 @@
-name: Build backend image
+name: Build and publish backend image
 on:
   push: { branches: [main] }
   workflow_dispatch:
-permissions: { contents: read, packages: write }
+permissions: { contents: read, id-token: write }
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: { role-to-assume: ${{ vars.AWS_ROLE_ARN }}, aws-region: ${{ vars.AWS_REGION }} }
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/creator-link-store-backend:${{ github.sha }}
+          tags: ${{ steps.ecr.outputs.registry }}/creator-link-store-backend:${{ github.sha }}
