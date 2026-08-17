@@ -1,19 +1,22 @@
-name: Build and publish backend image
+name: Build and publish backend artifact
 on:
   push: { branches: [main] }
   workflow_dispatch:
-permissions: { contents: read, id-token: write }
+permissions: { contents: read, packages: write, attestations: write, id-token: write }
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
-        with: { role-to-assume: ${{ vars.AWS_ROLE_ARN }}, aws-region: ${{ vars.AWS_REGION }} }
-      - id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17', cache: maven }
+      - run: mvn -B verify
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: ${{ github.actor }}, password: ${{ secrets.GITHUB_TOKEN }} }
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ steps.ecr.outputs.registry }}/creator-link-store-backend:${{ github.sha }}
+          tags: ghcr.io/${{ github.repository_owner }}/creator-link-store-backend:sha-${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with: { name: backend-jar-${{ github.sha }}, path: target/*.jar, retention-days: 30 }
