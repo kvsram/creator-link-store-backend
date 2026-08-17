@@ -1,0 +1,13 @@
+server:
+  port: ${PORT:8080}
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/creatorstore}
+    username: ${DB_USER:creator}
+    password: ${DB_PASSWORD:creator}
+  sql:
+    init:
+      mode: always
+  jdbc:
+    template:
+      query-timeout: 5

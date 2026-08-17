@@ -1,0 +1,4 @@
+create table if not exists creators (id bigserial primary key, handle varchar(40) unique not null, display_name varchar(80) not null, email varchar(255) unique not null, password_hash varchar(255) not null, bio varchar(280) not null default '');
+create table if not exists links (id bigserial primary key, creator_id bigint not null references creators(id) on delete cascade, title varchar(100) not null, url varchar(2048) not null, position integer not null default 0);
+create table if not exists products (id bigserial primary key, creator_id bigint not null references creators(id) on delete cascade, title varchar(100) not null, description varchar(500) not null, price_cents integer not null check(price_cents >= 0));
+create table if not exists click_events (id bigserial primary key, link_id bigint not null references links(id) on delete cascade, occurred_at timestamptz not null default current_timestamp, referrer varchar(500));
