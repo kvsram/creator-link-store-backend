@@ -15,7 +15,7 @@ create table if not exists stores (
   creator_id bigint unique not null references creators(id) on delete cascade,
   title varchar(100) not null,
   theme varchar(40) not null default 'violet',
-  currency char(3) not null default 'USD',
+  currency char(3) not null default 'INR',
   published boolean not null default true,
   payouts_enabled boolean not null default false
 );
@@ -218,3 +218,52 @@ create index if not exists idx_products_creator_status on products(creator_id,st
 create index if not exists idx_orders_creator_created on orders(creator_id,created_at desc);
 create index if not exists idx_visits_creator_time on store_visits(creator_id,occurred_at desc);
 create index if not exists idx_customers_creator_created on customers(creator_id,created_at desc);
+
+-- Existing column names are retained for backward-compatible local volumes. They hold
+-- generic smallest-currency-unit values (paise for INR), never decimal rupee values.
+comment on column products.price_cents is 'Deprecated name: smallest currency units; paise when store currency is INR';
+comment on column orders.amount_cents is 'Deprecated name: smallest currency units; paise when store currency is INR';
+comment on column orders.fee_cents is 'Deprecated name: smallest currency units; paise when store currency is INR';
+
+create table if not exists checkout_sessions (
+  id varchar(36) primary key,
+  creator_id bigint not null references creators(id) on delete cascade,
+  product_id bigint not null references products(id) on delete restrict,
+  provider varchar(20) not null,
+  provider_session_id varchar(255),
+  idempotency_key varchar(120) not null,
+  currency char(3) not null,
+  amount_subunits integer not null check(amount_subunits >= 0),
+  status varchar(30) not null default 'created',
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp,
+  unique(creator_id,idempotency_key)
+);
+
+create table if not exists provider_events (
+  id bigserial primary key,
+  provider varchar(20) not null,
+  event_key varchar(64) not null,
+  event_type varchar(100) not null,
+  payload_sha256 varchar(64) not null,
+  signature_verified boolean not null,
+  processed_at timestamptz not null default current_timestamp,
+  unique(provider,event_key)
+);
+
+create table if not exists instagram_events (
+  id bigserial primary key,
+  event_key varchar(64) unique not null,
+  payload_sha256 varchar(64) not null,
+  signature_verified boolean not null,
+  processed_at timestamptz not null default current_timestamp
+);
+
+update stores set currency='INR'
+where currency='USD' and creator_id in (select id from creators where email like '%@example.test');
+update stores set payouts_enabled=false where creator_id in (select id from creators where email like '%@example.test');
+update products set price_cents=49900 where title='Creator Content Calendar' and creator_id in (select id from creators where email like '%@example.test');
+update products set price_cents=249900 where title='Strategy Session' and creator_id in (select id from creators where email like '%@example.test');
+update orders set amount_cents=49900,fee_cents=998 where creator_id in (select id from creators where email like '%@example.test');
+
+create index if not exists idx_checkout_creator_created on checkout_sessions(creator_id,created_at desc);

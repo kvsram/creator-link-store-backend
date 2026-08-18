@@ -11,3 +11,23 @@ spring:
   jdbc:
     template:
       query-timeout: 5
+payments:
+  mode: ${PAYMENTS_MODE:disabled}
+  default-provider: ${PAYMENTS_DEFAULT_PROVIDER:razorpay}
+  success-url: ${PAYMENTS_SUCCESS_URL:http://localhost:3000/alex?checkout=success}
+  cancel-url: ${PAYMENTS_CANCEL_URL:http://localhost:3000/alex?checkout=cancelled}
+  razorpay:
+    key-id: ${RAZORPAY_KEY_ID:}
+    key-secret: ${RAZORPAY_KEY_SECRET:}
+    webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+  stripe:
+    secret-key: ${STRIPE_SECRET_KEY:}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+instagram:
+  mode: ${INSTAGRAM_MODE:disabled}
+  graph-api-version: ${INSTAGRAM_GRAPH_API_VERSION:v23.0}
+  account-id: ${INSTAGRAM_ACCOUNT_ID:}
+  access-token: ${INSTAGRAM_ACCESS_TOKEN:}
+  app-secret: ${INSTAGRAM_APP_SECRET:}
+  verify-token: ${INSTAGRAM_VERIFY_TOKEN:}
+  test-recipient-ids: ${INSTAGRAM_TEST_RECIPIENT_IDS:}

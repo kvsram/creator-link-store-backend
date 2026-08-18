@@ -25,6 +25,9 @@ spec:
               valueFrom: { secretKeyRef: { name: creator-store-db, key: username } }
             - name: DB_PASSWORD
               valueFrom: { secretKeyRef: { name: creator-store-db, key: password } }
+          envFrom:
+            - configMapRef: { name: creator-store-integrations }
+            - secretRef: { name: creator-store-runtime-secrets, optional: true }
           readinessProbe:
             httpGet: { path: /health, port: http }
             initialDelaySeconds: 10
@@ -34,3 +37,12 @@ spec:
           resources:
             requests: { cpu: 250m, memory: 512Mi }
             limits: { cpu: 1, memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }

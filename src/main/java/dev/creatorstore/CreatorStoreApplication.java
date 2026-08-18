@@ -21,18 +21,18 @@ public class CreatorStoreApplication {
     db.update("insert into creators(handle,display_name,email,password_hash,bio) values(?,?,?,?,?)",
         "alex", "Alex Rivera", "alex@example.test", disabledDemoCredential, "Systems and templates for independent creators.");
     long creatorId = db.queryForObject("select id from creators where handle='alex'", Long.class);
-    db.update("insert into stores(creator_id,title,payouts_enabled) values(?,?,?)", creatorId, "Alex's Creator Store", true);
+    db.update("insert into stores(creator_id,title,currency,payouts_enabled) values(?,?,?,?)", creatorId, "Alex's Creator Store", "INR", false);
     db.update("insert into links(creator_id,title,url,position) values(?,?,?,?)", creatorId, "Free weekly newsletter", "https://example.com/newsletter", 1);
-    db.update("insert into products(creator_id,type,title,description,price_cents,position) values(?,?,?,?,?,?)", creatorId, "digital-download", "Creator Content Calendar", "A practical 30-day content planning workbook.", 1900, 1);
-    db.update("insert into products(creator_id,type,title,description,price_cents,position) values(?,?,?,?,?,?)", creatorId, "meeting", "Strategy Session", "A focused 45-minute planning call.", 9900, 2);
+    db.update("insert into products(creator_id,type,title,description,price_cents,position) values(?,?,?,?,?,?)", creatorId, "digital-download", "Creator Content Calendar", "A practical 30-day content planning workbook.", 49900, 1);
+    db.update("insert into products(creator_id,type,title,description,price_cents,position) values(?,?,?,?,?,?)", creatorId, "meeting", "Strategy Session", "A focused 45-minute planning call.", 249900, 2);
     long productId = db.queryForObject("select id from products where creator_id=? order by id limit 1", Long.class, creatorId);
     db.update("insert into customers(creator_id,name,email,source) values(?,?,?,?)", creatorId, "Jamie Chen", "jamie@example.test", "checkout");
     long customerId = db.queryForObject("select id from customers where creator_id=? limit 1", Long.class, creatorId);
-    db.update("insert into orders(creator_id,customer_id,product_id,amount_cents,fee_cents,status,created_at) values(?,?,?,?,?,'paid',current_timestamp - interval '2 days')", creatorId, customerId, productId, 1900, 190);
+    db.update("insert into orders(creator_id,customer_id,product_id,amount_cents,fee_cents,status,created_at) values(?,?,?,?,?,'paid',current_timestamp - interval '2 days')", creatorId, customerId, productId, 49900, 998);
     db.update("insert into leads(creator_id,product_id,email) values(?,?,?)", creatorId, productId, "reader@example.test");
     db.update("insert into store_visits(creator_id,path,referrer,occurred_at) values(?,?,?,current_timestamp - interval '1 day')", creatorId, "/alex", "instagram.com");
-    for (String provider : List.of("stripe", "paypal", "mailchimp", "zoom", "google-calendar", "instagram"))
-      db.update("insert into integrations(creator_id,provider,status) values(?,?,?)", creatorId, provider, provider.equals("stripe") ? "connected" : "disconnected");
+    for (String provider : List.of("razorpay", "stripe", "mailchimp", "zoom", "google-calendar", "instagram"))
+      db.update("insert into integrations(creator_id,provider,status) values(?,?,?)", creatorId, provider, "disconnected");
     db.update("insert into notification_preferences(creator_id) values(?)", creatorId);
     db.update("insert into automations(creator_id,name,trigger_type,message,status) values(?,?,?,?,?)", creatorId, "Send free guide", "instagram_comment", "Thanks! Here is the guide: https://example.com/guide", "draft");
   }; }
@@ -57,7 +57,7 @@ class CreatorController {
         "creator", creator,
         "store", stores.get(0),
         "links", db.queryForList("select id,title,url from links where creator_id=? and published=true order by position,id", id),
-        "products", db.queryForList("select id,type,title,description,price_cents,thumbnail_url from products where creator_id=? and status='published' order by position,id", id)));
+        "products", db.queryForList("select id,type,title,description,price_cents as price_subunits,price_cents,thumbnail_url from products where creator_id=? and status='published' order by position,id", id)));
   }
 
   @RequestMapping(value="/api/v1/authentication/check-unique-taken", method=RequestMethod.OPTIONS)
@@ -123,22 +123,26 @@ class CreatorController {
 
   @GetMapping("/api/v1/store") Map<String,Object> store(@RequestParam(defaultValue="1") long creatorId) {
     return Map.of("store", first("select id,title,theme,currency,published,payouts_enabled from stores where creator_id=?", creatorId),
-        "products", db.queryForList("select id,type,title,description,price_cents,status,position,thumbnail_url from products where creator_id=? order by position,id", creatorId),
+        "products", db.queryForList("select id,type,title,description,price_cents as price_subunits,price_cents,status,position,thumbnail_url from products where creator_id=? order by position,id", creatorId),
         "product_types", List.of("lead-magnet","digital-download","meeting","fulfillment","course","membership","webinar","community"));
   }
 
   @PostMapping("/api/v1/products") ResponseEntity<?> addProduct(@RequestBody ProductIn x) {
     if (!Set.of("lead-magnet","digital-download","meeting","fulfillment","course","membership","webinar","community").contains(x.type()))
       return ResponseEntity.badRequest().body(Map.of("error", "unsupported product type"));
-    db.update("insert into products(creator_id,type,title,description,price_cents,status,position) values(?,?,?,?,?,?,?)", x.creatorId(), x.type(), x.title(), x.description(), x.priceCents(), x.status()==null?"draft":x.status(), x.position());
+    if (x.title()==null || x.title().isBlank() || x.description()==null || x.priceSubunits()<0)
+      return ResponseEntity.badRequest().body(Map.of("error", "title, description, and a non-negative priceSubunits are required"));
+    db.update("insert into products(creator_id,type,title,description,price_cents,status,position) values(?,?,?,?,?,?,?)", x.creatorId(), x.type(), x.title(), x.description(), x.priceSubunits(), x.status()==null?"draft":x.status(), x.position());
     long id = db.queryForObject("select max(id) from products where creator_id=?", Long.class, x.creatorId());
-    return ResponseEntity.status(201).body(first("select id,type,title,description,price_cents,status,position from products where id=?", id));
+    return ResponseEntity.status(201).body(first("select id,type,title,description,price_cents as price_subunits,price_cents,status,position from products where id=?", id));
   }
 
   @GetMapping("/api/v1/income") Map<String,Object> income(@RequestParam(defaultValue="1") long creatorId) {
-    return Map.of("summary", first("select coalesce(sum(amount_cents),0) as gross_cents,coalesce(sum(fee_cents),0) as fees_cents,coalesce(sum(amount_cents-fee_cents),0) as net_cents,count(*) as order_count from orders where creator_id=? and status='paid'", creatorId),
-        "orders", db.queryForList("select o.id,o.amount_cents,o.fee_cents,o.status,o.created_at,c.name as customer,p.title as product from orders o left join customers c on c.id=o.customer_id left join products p on p.id=o.product_id where o.creator_id=? order by o.created_at desc limit 100", creatorId),
-        "currency", "USD", "cashout", Map.of("available_cents", 1710, "pending_cents", 0));
+    String currency = String.valueOf(first("select currency from stores where creator_id=?", creatorId).getOrDefault("currency", "INR"));
+    return Map.of("summary", first("select coalesce(sum(amount_cents),0) as gross_subunits,coalesce(sum(fee_cents),0) as fees_subunits,coalesce(sum(amount_cents-fee_cents),0) as net_subunits,count(*) as order_count from orders where creator_id=? and status='paid'", creatorId),
+        "orders", db.queryForList("select o.id,o.amount_cents as amount_subunits,o.fee_cents as fee_subunits,o.status,o.created_at,c.name as customer,p.title as product from orders o left join customers c on c.id=o.customer_id left join products p on p.id=o.product_id where o.creator_id=? order by o.created_at desc limit 100", creatorId),
+        "currency", currency, "cashout", Map.of("available_subunits", 48902, "pending_subunits", 0),
+        "real_money_notice", "Amounts represent real-world currency in the smallest unit. No payout occurs unless a configured provider confirms it.");
   }
 
   @GetMapping("/api/v1/analytics") Map<String,Object> analytics(@RequestParam(defaultValue="1") long creatorId) {
@@ -204,7 +208,7 @@ class CreatorController {
     return Map.of("visits", count("select count(*) from store_visits where creator_id=?", creatorId),
         "leads", count("select count(*) from leads where creator_id=?", creatorId),
         "orders", count("select count(*) from orders where creator_id=? and status='paid'", creatorId),
-        "revenue_cents", count("select coalesce(sum(amount_cents),0) from orders where creator_id=? and status='paid'", creatorId));
+        "revenue_subunits", count("select coalesce(sum(amount_cents),0) from orders where creator_id=? and status='paid'", creatorId));
   }
   private Map<String,Object> first(String sql, Object... args) { List<Map<String,Object>> rows=db.queryForList(sql,args); return rows.isEmpty()?Map.of():rows.get(0); }
   private long count(String sql,Object... args) { Number n=db.queryForObject(sql,Number.class,args); return n==null?0:n.longValue(); }
@@ -213,7 +217,7 @@ class CreatorController {
   private static String text(Object x) { return x==null?"":String.valueOf(x); }
 
   record Register(String handle,String displayName,String email,String phone,String password) {}
-  record ProductIn(long creatorId,String type,String title,String description,int priceCents,String status,int position) {}
+  record ProductIn(long creatorId,String type,String title,String description,int priceSubunits,String status,int position) {}
   record CustomerIn(long creatorId,String name,String email,String phone) {}
   record ClickIn(long linkId,String referrer) {}
 }

@@ -2,6 +2,7 @@ resources:
   - namespace.yaml
   - service.yaml
   - deployment.yaml
+  - integration-config.yaml
   - hpa.yaml
   - pdb.yaml
   - network-policy.yaml
