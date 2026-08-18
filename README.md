@@ -11,14 +11,14 @@ It listens on port 8080 and its inferred PostgreSQL schema is initialized from `
 
 India launch defaults are `INR`, Razorpay as the preferred strategy, and both payments and Instagram disabled. `GET /api/v1/payments/config` and `GET /api/v1/integrations/instagram/config` report safe readiness without secrets. Provider modes are `disabled`, `test`, and `live`; use test credentials locally and store deployed secrets in AWS Secrets Manager. Checkout amounts are always loaded server-side and expressed as integer paise in `*_subunits` fields.
 
-For the complete three-container workflow and API reference, clone the infrastructure repository beside this repository as `infrastructure` and follow `infrastructure/README.md`.
+For the complete three-container workflow and API reference, start with the [infrastructure repository](https://github.com/kvsram/creator-link-store-infrastructure). Its bootstrap script clones all missing siblings, validates the laptop, starts the three containers, and runs the supported-contract smoke test. Its feature-parity matrix is the source of truth for what is complete versus a route/schema foundation.
 
 ## Regional Kubernetes deployment
 
 `deploy/overlays/region-a`, `region-b`, and `region-c` target three independent Kubernetes clusters. Each deploys one API replica initially, with an HPA that can grow to three replicas in that region. The application remains stateless; PostgreSQL is an external managed service, not a Pod in every cluster.
 
-Create the `creator-store-db` Secret in each cluster using its private managed-PostgreSQL endpoint. For the first low-scale phase, point all regions to one primary database in the closest region. Do not commit a real database password: replace the template with External Secrets or a cloud secret-manager integration.
+Create the `creator-store-db` Secret in each cluster using its private managed-PostgreSQL endpoint. It is deliberately not generated from the placeholder template by Kustomize. For the first low-scale phase, use one active writer region and keep another region warm; the current API has no read/write datasource split and arbitrary cross-region writes are unsafe. Do not commit a real database password: create the Secret through External Secrets or an equivalent cloud secret-manager integration.
 
 The integration ConfigMap deliberately keeps `PAYMENTS_MODE` and `INSTAGRAM_MODE` disabled. Create `creator-store-runtime-secrets` through External Secrets before switching a stage to `test`. `deploy/base/integration-secret.template.yaml` documents names only and is intentionally excluded from Kustomize.
 
-GitHub Actions builds an immutable GHCR image on every `main` push. To enable manual deploys, create GitHub Environments named `region-a`, `region-b`, and `region-c`, each with a base64-encoded `KUBECONFIG_B64` secret for only its cluster. Trigger **Deploy backend** with the image commit SHA.
+GitHub Actions builds an immutable GHCR image on every `main` push. Manual promotion uses protected GitHub Environments `dev`, `preprod`, and `prod`, short-lived AWS OIDC credentials, and a self-hosted runner labeled `aws-private` that can reach the private EKS API. Configure the regional variables documented in the infrastructure repository and trigger **Deploy backend** with the exact 40-character image commit SHA. No kubeconfig is stored in GitHub.

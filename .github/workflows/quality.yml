@@ -11,5 +11,9 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17', cache: maven }
       - run: mvn -B verify
+      - run: |
+          for region in region-a region-b region-c; do
+            kubectl kustomize "deploy/overlays/$region" >/dev/null
+          done
       - uses: aquasecurity/trivy-action@v0.36.0
         with: { scan-type: fs, severity: HIGH,CRITICAL, exit-code: '1' }

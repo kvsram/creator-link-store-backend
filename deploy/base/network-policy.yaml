@@ -18,3 +18,5 @@ spec:
         - { protocol: TCP, port: 53 }
     - ports: [{ protocol: TCP, port: 5432 }]
       # Set namespaceSelector/ipBlock for the managed PostgreSQL network before enabling in a cloud cluster.
+    - ports: [{ protocol: TCP, port: 443 }]
+      # Required only for enabled payment/Instagram providers. Narrow this with an egress gateway or provider ranges where practical.

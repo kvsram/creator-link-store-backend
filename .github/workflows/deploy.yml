@@ -5,17 +5,78 @@ on:
       stage: { type: choice, options: [dev, preprod, prod], required: true }
       region: { type: choice, options: [region-a, region-b, region-c], required: true }
       image_tag: { required: true, description: Immutable Git SHA, without sha- prefix }
-      change_ticket: { required: true, description: Required for preprod and prod promotion }
+      change_ticket: { required: false, description: Required for preprod and prod promotion }
+
+permissions:
+  contents: read
+  id-token: write
+  packages: read
+
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # EKS API endpoints are private. Register this runner inside the VPC or a connected network.
+    runs-on: [self-hosted, linux, aws-private]
     environment: ${{ inputs.stage }}
     concurrency:
       group: backend-${{ inputs.stage }}-${{ inputs.region }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
-      - run: echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > $HOME/.kube/config
-      - run: kubectl apply -k deploy/overlays/${{ inputs.region }}
-      - run: kubectl -n creator-store set image deployment/creator-store-api api=ghcr.io/${{ github.repository_owner }}/creator-link-store-backend:sha-${{ inputs.image_tag }}
-      - run: kubectl -n creator-store rollout status deployment/creator-store-api --timeout=180s
+      - name: Validate promotion inputs
+        shell: bash
+        run: |
+          test "${#IMAGE_TAG}" -eq 40
+          [[ "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$STAGE" != dev && -z "$CHANGE_TICKET" ]]; then
+            echo "A change ticket is required for preprod/prod." >&2
+            exit 1
+          fi
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          STAGE: ${{ inputs.stage }}
+          CHANGE_TICKET: ${{ inputs.change_ticket }}
+      - name: Resolve regional cluster
+        id: target
+        shell: bash
+        run: |
+          case "$TARGET" in
+            region-a) aws_region="$AWS_REGION_A"; cluster="$EKS_CLUSTER_A" ;;
+            region-b) aws_region="$AWS_REGION_B"; cluster="$EKS_CLUSTER_B" ;;
+            region-c) aws_region="$AWS_REGION_C"; cluster="$EKS_CLUSTER_C" ;;
+            *) exit 2 ;;
+          esac
+          test -n "$aws_region"
+          test -n "$cluster"
+          echo "aws_region=$aws_region" >> "$GITHUB_OUTPUT"
+          echo "cluster=$cluster" >> "$GITHUB_OUTPUT"
+        env:
+          TARGET: ${{ inputs.region }}
+          AWS_REGION_A: ${{ vars.AWS_REGION_A }}
+          AWS_REGION_B: ${{ vars.AWS_REGION_B }}
+          AWS_REGION_C: ${{ vars.AWS_REGION_C }}
+          EKS_CLUSTER_A: ${{ vars.EKS_CLUSTER_A }}
+          EKS_CLUSTER_B: ${{ vars.EKS_CLUSTER_B }}
+          EKS_CLUSTER_C: ${{ vars.EKS_CLUSTER_C }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ steps.target.outputs.aws_region }}
+      - name: Obtain short-lived cluster credential
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER"
+        env:
+          AWS_REGION: ${{ steps.target.outputs.aws_region }}
+          CLUSTER: ${{ steps.target.outputs.cluster }}
+      - name: Apply and promote immutable image
+        shell: bash
+        run: |
+          kubectl apply -k "deploy/overlays/$TARGET"
+          repository="$IMAGE_REPOSITORY"
+          if [[ -z "$repository" ]]; then
+            repository="ghcr.io/${GITHUB_REPOSITORY_OWNER}/creator-link-store-backend"
+          fi
+          kubectl -n creator-store set image deployment/creator-store-api "api=${repository}:sha-${IMAGE_TAG}"
+          kubectl -n creator-store rollout status deployment/creator-store-api --timeout=240s
+        env:
+          TARGET: ${{ inputs.region }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          IMAGE_REPOSITORY: ${{ vars.BACKEND_IMAGE_REPOSITORY }}
