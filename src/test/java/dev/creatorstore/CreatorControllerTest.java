@@ -16,7 +16,7 @@ class CreatorControllerTest {
   @Test
   void registrationRejectsUnsafeInputBeforeDatabaseAccess() {
     CreatorController controller = new CreatorController((JdbcTemplate) null);
-    var response = controller.register(new CreatorController.Register("x", "Name", "bad-email", "short"));
+    var response = controller.register(new CreatorController.Register("x", "Name", "bad-email", null, "short"));
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
   }
 }

@@ -1,13 +1,15 @@
 # Creator Link Store API
 
-Spring Boot API for creator profiles, public links, products, and click analytics.
+Spring Boot API for the sectioned creator admin, public storefront, products, customers, orders, analytics, integrations, and automation metadata.
 
 ```bash
 docker compose up -d db
 mvn spring-boot:run
 ```
 
-It listens on port 8080 and its PostgreSQL schema is initialized from `src/main/resources/schema.sql`.
+It listens on port 8080 and its inferred PostgreSQL schema is initialized from `src/main/resources/schema.sql`. A clean database seeds the deterministic `alex` demo. This schema and its response bodies are original project contracts, not a claim about Stan's private database or responses.
+
+For the complete three-container workflow and API reference, clone the infrastructure repository beside this repository as `infrastructure` and follow `infrastructure/README.md`.
 
 ## Regional Kubernetes deployment
 
