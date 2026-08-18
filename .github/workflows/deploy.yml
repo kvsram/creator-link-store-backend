@@ -5,6 +5,7 @@ on:
       stage: { type: choice, options: [dev, preprod, prod], required: true }
       region: { type: choice, options: [region-a, region-b, region-c], required: true }
       image_tag: { required: true, description: Immutable Git SHA, without sha- prefix }
+      infrastructure_release: { required: true, description: Applied infrastructure repository Git SHA }
       change_ticket: { required: false, description: Required for preprod and prod promotion }
 
 permissions:
@@ -27,12 +28,14 @@ jobs:
         run: |
           test "${#IMAGE_TAG}" -eq 40
           [[ "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$INFRASTRUCTURE_RELEASE" =~ ^[0-9a-f]{40}$ ]]
           if [[ "$STAGE" != dev && -z "$CHANGE_TICKET" ]]; then
             echo "A change ticket is required for preprod/prod." >&2
             exit 1
           fi
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
+          INFRASTRUCTURE_RELEASE: ${{ inputs.infrastructure_release }}
           STAGE: ${{ inputs.stage }}
           CHANGE_TICKET: ${{ inputs.change_ticket }}
       - name: Resolve regional cluster
@@ -40,43 +43,87 @@ jobs:
         shell: bash
         run: |
           case "$TARGET" in
-            region-a) aws_region="$AWS_REGION_A"; cluster="$EKS_CLUSTER_A" ;;
-            region-b) aws_region="$AWS_REGION_B"; cluster="$EKS_CLUSTER_B" ;;
-            region-c) aws_region="$AWS_REGION_C"; cluster="$EKS_CLUSTER_C" ;;
+            region-a) aws_region="$AWS_REGION_A" ;;
+            region-b) aws_region="$AWS_REGION_B" ;;
+            region-c) aws_region="$AWS_REGION_C" ;;
             *) exit 2 ;;
           esac
           test -n "$aws_region"
-          test -n "$cluster"
           echo "aws_region=$aws_region" >> "$GITHUB_OUTPUT"
-          echo "cluster=$cluster" >> "$GITHUB_OUTPUT"
         env:
           TARGET: ${{ inputs.region }}
           AWS_REGION_A: ${{ vars.AWS_REGION_A }}
           AWS_REGION_B: ${{ vars.AWS_REGION_B }}
           AWS_REGION_C: ${{ vars.AWS_REGION_C }}
-          EKS_CLUSTER_A: ${{ vars.EKS_CLUSTER_A }}
-          EKS_CLUSTER_B: ${{ vars.EKS_CLUSTER_B }}
-          EKS_CLUSTER_C: ${{ vars.EKS_CLUSTER_C }}
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ steps.target.outputs.aws_region }}
+      - name: Verify infrastructure release and resolve its contract
+        id: infrastructure
+        shell: bash
+        run: |
+          prefix="/creator-store/${STAGE}/${TARGET}"
+          actual_release="$(aws ssm get-parameter --name "/creator-store/${STAGE}/infrastructure-release" --query Parameter.Value --output text)"
+          test "$actual_release" = "$EXPECTED_RELEASE"
+          cluster="$(aws ssm get-parameter --name "${prefix}/eks-cluster-name" --query Parameter.Value --output text)"
+          image_repository="$(aws ssm get-parameter --name "${prefix}/backend-ecr-url" --query Parameter.Value --output text)"
+          database_endpoint="$(aws ssm get-parameter --name "${prefix}/database-endpoint" --query Parameter.Value --output text)"
+          database_secret_arn="$(aws ssm get-parameter --name "${prefix}/database-master-secret-arn" --query Parameter.Value --output text)"
+          test -n "$cluster"
+          test -n "$image_repository"
+          test -n "$database_endpoint"
+          test -n "$database_secret_arn"
+          echo "cluster=$cluster" >> "$GITHUB_OUTPUT"
+          echo "image_repository=$image_repository" >> "$GITHUB_OUTPUT"
+          echo "database_endpoint=$database_endpoint" >> "$GITHUB_OUTPUT"
+          echo "database_secret_arn=$database_secret_arn" >> "$GITHUB_OUTPUT"
+        env:
+          STAGE: ${{ inputs.stage }}
+          TARGET: ${{ inputs.region }}
+          EXPECTED_RELEASE: ${{ inputs.infrastructure_release }}
       - name: Obtain short-lived cluster credential
         run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER"
         env:
           AWS_REGION: ${{ steps.target.outputs.aws_region }}
-          CLUSTER: ${{ steps.target.outputs.cluster }}
+          CLUSTER: ${{ steps.infrastructure.outputs.cluster }}
+      - name: Promote built artifact into environment ECR
+        shell: bash
+        run: |
+          registry="${TARGET_REPOSITORY%%/*}"
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$registry"
+          docker pull "$SOURCE_IMAGE"
+          docker tag "$SOURCE_IMAGE" "$TARGET_IMAGE"
+          docker push "$TARGET_IMAGE"
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AWS_REGION: ${{ steps.target.outputs.aws_region }}
+          SOURCE_IMAGE: ghcr.io/${{ github.repository_owner }}/creator-link-store-backend:sha-${{ inputs.image_tag }}
+          TARGET_REPOSITORY: ${{ steps.infrastructure.outputs.image_repository }}
+          TARGET_IMAGE: ${{ steps.infrastructure.outputs.image_repository }}:sha-${{ inputs.image_tag }}
+      - name: Materialize database connection secret
+        shell: bash
+        run: |
+          kubectl apply -f deploy/base/namespace.yaml
+          secret_file="$(mktemp)"
+          trap 'rm -f "$secret_file"' EXIT
+          secret_json="$(aws secretsmanager get-secret-value --secret-id "$DATABASE_SECRET_ARN" --query SecretString --output text)"
+          username="$(jq -r '.username' <<< "$secret_json")"
+          password="$(jq -r '.password' <<< "$secret_json")"
+          umask 077
+          printf 'url=jdbc:postgresql://%s:5432/creatorstore\nusername=%s\npassword=%s\n' "$DATABASE_ENDPOINT" "$username" "$password" > "$secret_file"
+          kubectl -n creator-store create secret generic creator-store-db --from-env-file="$secret_file" --dry-run=client -o yaml | kubectl apply -f -
+        env:
+          DATABASE_ENDPOINT: ${{ steps.infrastructure.outputs.database_endpoint }}
+          DATABASE_SECRET_ARN: ${{ steps.infrastructure.outputs.database_secret_arn }}
       - name: Apply and promote immutable image
         shell: bash
         run: |
           kubectl apply -k "deploy/overlays/$TARGET"
-          repository="$IMAGE_REPOSITORY"
-          if [[ -z "$repository" ]]; then
-            repository="ghcr.io/${GITHUB_REPOSITORY_OWNER}/creator-link-store-backend"
-          fi
-          kubectl -n creator-store set image deployment/creator-store-api "api=${repository}:sha-${IMAGE_TAG}"
+          kubectl -n creator-store set image deployment/creator-store-api "api=${IMAGE_REPOSITORY}:sha-${IMAGE_TAG}"
           kubectl -n creator-store rollout status deployment/creator-store-api --timeout=240s
         env:
           TARGET: ${{ inputs.region }}
           IMAGE_TAG: ${{ inputs.image_tag }}
-          IMAGE_REPOSITORY: ${{ vars.BACKEND_IMAGE_REPOSITORY }}
+          IMAGE_REPOSITORY: ${{ steps.infrastructure.outputs.image_repository }}

@@ -2,6 +2,15 @@
 
 Spring Boot API for the sectioned creator admin, public storefront, products, customers, orders, analytics, integrations, and automation metadata.
 
+The code is a traditional layered Spring Boot modular monolith:
+
+```text
+controller -> service -> repository -> PostgreSQL
+                     -> provider strategy/client -> Razorpay, Stripe, Instagram
+```
+
+`CreatorStoreApplication` is only the entry point. Domain-specific REST controllers contain routing, services contain validation/orchestration, repositories contain parameterized SQL, DTO records define request contracts, and integration adapters isolate provider HTTP calls. The infrastructure repository's `docs/backend-architecture.md` contains the full package/controller map.
+
 ```bash
 docker compose up -d db
 mvn spring-boot:run
@@ -21,4 +30,4 @@ Create the `creator-store-db` Secret in each cluster using its private managed-P
 
 The integration ConfigMap deliberately keeps `PAYMENTS_MODE` and `INSTAGRAM_MODE` disabled. Create `creator-store-runtime-secrets` through External Secrets before switching a stage to `test`. `deploy/base/integration-secret.template.yaml` documents names only and is intentionally excluded from Kustomize.
 
-GitHub Actions builds an immutable GHCR image on every `main` push. Manual promotion uses protected GitHub Environments `dev`, `preprod`, and `prod`, short-lived AWS OIDC credentials, and a self-hosted runner labeled `aws-private` that can reach the private EKS API. Configure the regional variables documented in the infrastructure repository and trigger **Deploy backend** with the exact 40-character image commit SHA. No kubeconfig is stored in GitHub.
+GitHub Actions builds an immutable GHCR image on every `main` push. Manual promotion uses protected GitHub Environments `dev`, `preprod`, and `prod`, short-lived AWS OIDC credentials, and a self-hosted runner labeled `aws-private` that can reach the private EKS API. Configure the regional variables documented in the infrastructure repository and trigger **Deploy backend** with the exact 40-character image commit SHA plus the exact infrastructure SHA already applied to that stage. The workflow verifies the SSM release contract, copies the image to environment ECR, resolves the RDS managed secret, materializes `creator-store-db`, and then rolls out. No kubeconfig or database value is stored in GitHub.

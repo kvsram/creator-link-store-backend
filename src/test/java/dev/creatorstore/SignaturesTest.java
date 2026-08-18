@@ -2,6 +2,7 @@ package dev.creatorstore;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.creatorstore.security.Signatures;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
