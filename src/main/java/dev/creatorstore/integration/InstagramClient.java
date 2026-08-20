@@ -35,6 +35,15 @@ public class InstagramClient {
   }
 
   public Map<String, Object> send(String recipientId, String text) throws Exception {
+    return sendMessage(recipientId, text);
+  }
+
+  /** Meta private-reply flow: the recipient id is the Instagram comment id. */
+  public Map<String, Object> sendPrivateReply(String commentId, String text) throws Exception {
+    return sendMessage(commentId, text);
+  }
+
+  private Map<String, Object> sendMessage(String recipientId, String text) throws Exception {
     String body = json.writeValueAsString(
         Map.of("recipient", Map.of("id", recipientId), "message", Map.of("text", text)));
     HttpRequest request = HttpRequest.newBuilder(
@@ -44,7 +53,7 @@ public class InstagramClient {
         .POST(HttpRequest.BodyPublishers.ofString(body)).build();
     HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
     if (response.statusCode() / 100 != 2) {
-      throw new ProviderRejectedException(response.statusCode());
+      throw new ProviderRejectedException(response.statusCode(), response.body());
     }
     JsonNode result = json.readTree(response.body());
     return Map.of("sent", true, "recipient_id", result.path("recipient_id").asText(),
@@ -53,13 +62,24 @@ public class InstagramClient {
 
   public static class ProviderRejectedException extends Exception {
     private final int statusCode;
+    private final String responseBody;
 
-    public ProviderRejectedException(int statusCode) {
+    public ProviderRejectedException(int statusCode, String responseBody) {
+      super("Instagram rejected request with status " + statusCode);
       this.statusCode = statusCode;
+      this.responseBody = responseBody;
     }
 
     public int statusCode() {
       return statusCode;
+    }
+
+    public boolean retryable() {
+      return statusCode == 408 || statusCode == 429 || statusCode >= 500;
+    }
+
+    public String responseBody() {
+      return responseBody;
     }
   }
 }

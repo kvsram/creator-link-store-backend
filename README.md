@@ -18,7 +18,7 @@ DB_USER=creator DB_PASSWORD=creator mvn spring-boot:run
 
 It listens on port 8080 and its inferred PostgreSQL schema is initialized from `src/main/resources/schema.sql`. A clean database seeds the deterministic `alex` demo (its password is a random, intentionally-unusable value — register a real account via `POST /api/auth/register` and log in through `POST /api/auth/login` to get a usable session).
 
-India launch defaults are `INR`, Razorpay as the preferred strategy, and both payments and Instagram disabled. `GET /api/v1/payments/config` and `GET /api/v1/integrations/instagram/config` report safe readiness without secrets. Provider modes are `disabled`, `test`, and `live`; use test credentials locally and store deployed secrets in AWS Secrets Manager. Checkout amounts are always loaded server-side and expressed as integer paise in `*_subunits` fields.
+India launch defaults are `INR`, Razorpay as the preferred strategy, and both payments and Instagram disabled. `GET /api/v1/payments/config` and `GET /api/v1/integrations/instagram/config` report safe readiness without secrets. Provider modes are `disabled`, `test`, and `live`; use test credentials locally and store deployed secrets in the selected cloud secret manager. Checkout amounts are always loaded server-side and expressed as integer paise in `*_subunits` fields.
 
 ## Authentication
 
@@ -26,7 +26,11 @@ India launch defaults are `INR`, Razorpay as the preferred strategy, and both pa
 
 ## Product types
 
-All 8 types (`digital-download`, `lead-magnet`, `fulfillment`, `meeting`, `webinar`, `community`, `membership`, `course`) have real, working flows end to end — not just an accepted label. Each paid order grants a buyer an `entitlements` row with a random access token; `GET /api/buyer/access/{token}` (and type-specific sub-routes: file downloads, curriculum, booking, webinar join link, membership status) serves the purchased content with no buyer login required. See `CreatorStoreApplication.java` for the full endpoint list and `commerce/OrderFulfillmentService.java` for how a webhook-confirmed payment turns into an order, customer, and entitlement.
+The schema and webhook fulfillment service imported from Sai cover all 8 types (`digital-download`, `lead-magnet`, `fulfillment`, `meeting`, `webinar`, `community`, `membership`, `course`). The current layered API still needs the type-specific authoring and buyer-access controllers ported from Sai's monolithic controller before all eight flows can honestly be called end to end. Compiling the service is not endpoint proof.
+
+## Instagram Auto DM
+
+Signed comment webhooks can enqueue idempotent keyword rules through `/api/v1/automations/instagram-comment-rules`. Delivery uses a leased PostgreSQL queue, a seven-day private-reply expiry guard, bounded retries for retryable provider failures, and a permanent dead state for non-retryable failures. Instagram remains disabled until Meta App Review, per-creator OAuth token encryption, and the production gates in `docs/INSTAGRAM_AUTODM.md` are complete.
 
 ## Deployment
 
@@ -40,4 +44,4 @@ Create the `creator-store-db` Secret in each cluster using its private managed-P
 
 The integration ConfigMap deliberately keeps `PAYMENTS_MODE` and `INSTAGRAM_MODE` disabled. Create `creator-store-runtime-secrets` through External Secrets before switching a stage to `test`. `deploy/base/integration-secret.template.yaml` documents names only and is intentionally excluded from Kustomize.
 
-GitHub Actions builds an immutable GHCR image on every `main` push. Manual promotion uses protected GitHub Environments `dev`, `preprod`, and `prod`, short-lived AWS OIDC credentials, and a self-hosted runner labeled `aws-private` that can reach the private EKS API. Configure the regional variables documented in the infrastructure repository and trigger **Deploy backend** with the exact 40-character image commit SHA plus the exact infrastructure SHA already applied to that stage. The workflow verifies the SSM release contract, copies the image to environment ECR, resolves the RDS managed secret, materializes `creator-store-db`, and then rolls out. No kubeconfig or database value is stored in GitHub.
+GitHub Actions builds an immutable GHCR image on every `main` push. The infrastructure repository adds a cloud-neutral manual promotion workflow for EKS, AKS, and OKE. It uses a private runner attached to exactly one cloud/stage and deploys exact backend, frontend, and infrastructure SHAs. No kubeconfig or database value is stored in GitHub.

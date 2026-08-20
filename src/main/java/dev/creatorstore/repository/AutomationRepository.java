@@ -13,9 +13,11 @@ public class AutomationRepository {
     this.database = database;
   }
 
-  public List<Map<String, Object>> findStats(long automationId) {
+  public List<Map<String, Object>> findStats(long creatorId, long automationId) {
     return database.queryForList(
-        "select automation_id,comments_seen,messages_sent,link_clicks,updated_at from automation_stats where automation_id=?",
-        automationId);
+        "select s.automation_id,s.comments_seen,s.messages_sent,s.link_clicks,s.updated_at "
+            + "from automation_stats s join automations a on a.id=s.automation_id "
+            + "where s.automation_id=? and a.creator_id=?",
+        automationId, creatorId);
   }
 }

@@ -2,6 +2,8 @@ package dev.creatorstore.controller;
 
 import dev.creatorstore.dto.CustomerRequest;
 import dev.creatorstore.service.CustomerService;
+import dev.creatorstore.identity.AuthenticatedCreator;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,12 +21,13 @@ public class CustomerController {
   }
 
   @GetMapping("/api/v1/customers")
-  public Map<String, Object> list(@RequestParam(defaultValue = "1") long creatorId) {
-    return customers.list(creatorId);
+  public Map<String, Object> list(HttpServletRequest servletRequest) {
+    return customers.list(AuthenticatedCreator.id(servletRequest));
   }
 
   @PostMapping("/api/v1/customers")
-  public ResponseEntity<Map<String, Object>> create(@RequestBody CustomerRequest request) {
-    return ResponseEntity.status(201).body(customers.create(request));
+  public ResponseEntity<Map<String, Object>> create(@RequestBody CustomerRequest request,
+      HttpServletRequest servletRequest) {
+    return ResponseEntity.status(201).body(customers.create(AuthenticatedCreator.id(servletRequest), request));
   }
 }

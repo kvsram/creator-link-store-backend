@@ -19,18 +19,21 @@ import org.springframework.stereotype.Service;
 public class InstagramService {
   private final InstagramClient instagram;
   private final WebhookRepository webhooks;
+  private final InstagramAutomationService automations;
   private final String mode;
   private final String appSecret;
   private final String verifyToken;
   private final String recipientIds;
 
   public InstagramService(InstagramClient instagram, WebhookRepository webhooks,
+      InstagramAutomationService automations,
       @Value("${instagram.mode:disabled}") String mode,
       @Value("${instagram.app-secret:}") String appSecret,
       @Value("${instagram.verify-token:}") String verifyToken,
       @Value("${instagram.test-recipient-ids:}") String recipientIds) {
     this.instagram = instagram;
     this.webhooks = webhooks;
+    this.automations = automations;
     this.mode = mode;
     this.appSecret = appSecret;
     this.verifyToken = verifyToken;
@@ -41,8 +44,9 @@ public class InstagramService {
     return Map.of("external_service", true, "mode", mode, "configured", configured(),
         "send_enabled", Set.of("test", "live").contains(mode) && configured(),
         "test_recipient_count", testRecipients().size(),
-        "required_permission", "instagram_business_manage_messages",
-        "notice", "In test mode, messages can only be sent to allowlisted recipients who first messaged the professional account.");
+        "required_permissions", Set.of("instagram_business_manage_comments", "instagram_business_manage_messages"),
+        "private_reply_window_days", 7,
+        "notice", "Comment Auto DM uses Meta private replies: one reply per comment within seven days; follow-ups require the recipient to respond.");
   }
 
   public HttpResult verifyWebhook(String webhookMode, String token, String challenge) {
@@ -65,7 +69,8 @@ public class InstagramService {
     } catch (DataIntegrityViolationException duplicate) {
       return HttpResult.ok(Map.of("received", true, "duplicate", true));
     }
-    return HttpResult.ok(Map.of("received", true));
+    int queued = automations.acceptSignedWebhook(raw);
+    return HttpResult.ok(Map.of("received", true, "jobs_queued", queued));
   }
 
   public HttpResult sendTest(boolean confirmed, InstagramMessageRequest input) {

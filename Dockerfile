@@ -8,7 +8,9 @@ RUN mvn -q -DskipTests package
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
-RUN useradd --system --uid 10001 --create-home creatorstore
+RUN useradd --system --uid 10001 --create-home creatorstore \
+    && mkdir -p /data/uploads \
+    && chown -R creatorstore:creatorstore /data
 COPY --from=build /app/target/creator-store-api-0.0.1.jar app.jar
 RUN chown creatorstore:creatorstore app.jar
 USER 10001

@@ -9,14 +9,19 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
   private final AuthInterceptor authInterceptor;
+  private final OriginGuardInterceptor originGuard;
 
   @Value("${app.allowed-origins:http://localhost:5173,http://localhost:3000}")
   private String allowedOrigins;
 
-  WebConfig(AuthInterceptor authInterceptor) { this.authInterceptor = authInterceptor; }
+  WebConfig(AuthInterceptor authInterceptor, OriginGuardInterceptor originGuard) {
+    this.authInterceptor = authInterceptor;
+    this.originGuard = originGuard;
+  }
 
   @Override
   public void addInterceptors(InterceptorRegistry registry) {
+    registry.addInterceptor(originGuard).addPathPatterns("/api/**");
     registry.addInterceptor(authInterceptor)
         .addPathPatterns("/api/v1/**")
         .excludePathPatterns(

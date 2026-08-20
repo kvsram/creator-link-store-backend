@@ -1,8 +1,10 @@
 server:
   port: ${PORT:8080}
+  forward-headers-strategy: framework
 app:
   allowed-origins: ${APP_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
   storage-dir: ${APP_STORAGE_DIR:./data/uploads}
+  secure-cookies: ${APP_SECURE_COOKIES:false}
 spring:
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/creatorstore}
@@ -34,3 +36,5 @@ instagram:
   app-secret: ${INSTAGRAM_APP_SECRET:}
   verify-token: ${INSTAGRAM_VERIFY_TOKEN:}
   test-recipient-ids: ${INSTAGRAM_TEST_RECIPIENT_IDS:}
+  autodm-worker-enabled: ${INSTAGRAM_AUTODM_WORKER_ENABLED:true}
+  autodm-poll-ms: ${INSTAGRAM_AUTODM_POLL_MS:1000}

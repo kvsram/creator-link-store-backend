@@ -1,6 +1,8 @@
 package dev.creatorstore.controller;
 
 import dev.creatorstore.service.ReportingService;
+import dev.creatorstore.identity.AuthenticatedCreator;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -15,7 +17,7 @@ public class IncomeController {
   }
 
   @GetMapping("/api/v1/income")
-  public Map<String, Object> income(@RequestParam(defaultValue = "1") long creatorId) {
-    return reporting.income(creatorId);
+  public Map<String, Object> income(HttpServletRequest request) {
+    return reporting.income(AuthenticatedCreator.id(request));
   }
 }

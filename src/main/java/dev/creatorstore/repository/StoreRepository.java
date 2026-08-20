@@ -47,7 +47,7 @@ public class StoreRepository {
   }
 
   public void createDefault(long creatorId, String title) {
-    database.update("insert into stores(creator_id,title) values(?,?)", creatorId, title);
+    database.update("insert into stores(creator_id,title,currency) values(?,?,?)", creatorId, title, "INR");
   }
 
   private Map<String, Object> first(String sql, Object... args) {

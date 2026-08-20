@@ -365,3 +365,49 @@ create table if not exists sessions (
 );
 
 create index if not exists idx_sessions_creator on sessions(creator_id);
+
+create table if not exists instagram_automation_rules (
+  id bigserial primary key,
+  automation_id bigint not null references automations(id) on delete cascade,
+  creator_id bigint not null references creators(id) on delete cascade,
+  instagram_account_id varchar(80) not null,
+  media_id varchar(80) not null,
+  keywords varchar(2000) not null default '',
+  match_mode varchar(20) not null default 'any',
+  active boolean not null default true,
+  created_at timestamptz not null default current_timestamp,
+  unique(creator_id,media_id,automation_id)
+);
+
+create index if not exists idx_instagram_rules_account_media
+  on instagram_automation_rules(instagram_account_id,media_id) where active=true;
+
+create table if not exists instagram_comment_events (
+  id bigserial primary key,
+  provider_event_id varchar(160) unique not null,
+  instagram_account_id varchar(80) not null,
+  media_id varchar(80) not null,
+  comment_id varchar(80) unique not null,
+  commenter_scoped_id varchar(80),
+  commenter_username varchar(120),
+  comment_text varchar(4000) not null default '',
+  occurred_at timestamptz not null,
+  received_at timestamptz not null default current_timestamp
+);
+
+create table if not exists instagram_dm_jobs (
+  id bigserial primary key,
+  comment_event_id bigint unique not null references instagram_comment_events(id) on delete cascade,
+  automation_id bigint not null references automations(id) on delete cascade,
+  state varchar(20) not null default 'pending',
+  attempt_count integer not null default 0,
+  next_attempt_at timestamptz not null default current_timestamp,
+  lease_until timestamptz,
+  provider_message_id varchar(160),
+  last_error varchar(500),
+  created_at timestamptz not null default current_timestamp,
+  sent_at timestamptz
+);
+
+create index if not exists idx_instagram_dm_jobs_due
+  on instagram_dm_jobs(state,next_attempt_at,lease_until);

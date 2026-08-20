@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.beans.factory.annotation.Value;
 
 @RestController
 public class AuthController {
@@ -20,8 +21,12 @@ public class AuthController {
 
   private final JdbcTemplate db;
   private final BCryptPasswordEncoder passwords = new BCryptPasswordEncoder();
+  private final boolean secureCookies;
 
-  AuthController(JdbcTemplate db) { this.db = db; }
+  AuthController(JdbcTemplate db, @Value("${app.secure-cookies:false}") boolean secureCookies) {
+    this.db = db;
+    this.secureCookies = secureCookies;
+  }
 
   @PostMapping("/api/auth/login")
   ResponseEntity<?> login(@RequestBody LoginIn body, HttpServletRequest request) {
@@ -41,7 +46,8 @@ public class AuthController {
         SessionCookies.hash(token), creatorId);
 
     ResponseCookie cookie = ResponseCookie.from(SessionCookies.COOKIE_NAME, token)
-        .httpOnly(true).path("/").sameSite("Lax").maxAge(SESSION_TTL).secure(request.isSecure()).build();
+        .httpOnly(true).path("/").sameSite("Lax").maxAge(SESSION_TTL)
+        .secure(secureCookies || request.isSecure()).build();
     return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cookie.toString())
         .body(Map.of("id", creatorId, "handle", rows.get(0).get("handle"), "displayName", rows.get(0).get("display_name")));
   }
@@ -51,7 +57,8 @@ public class AuthController {
     String token = SessionCookies.readToken(request);
     if (token != null) db.update("update sessions set revoked_at=current_timestamp where id=? and revoked_at is null", SessionCookies.hash(token));
     ResponseCookie cleared = ResponseCookie.from(SessionCookies.COOKIE_NAME, "")
-        .httpOnly(true).path("/").sameSite("Lax").maxAge(0).secure(request.isSecure()).build();
+        .httpOnly(true).path("/").sameSite("Lax").maxAge(0)
+        .secure(secureCookies || request.isSecure()).build();
     return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, cleared.toString()).body(Map.of("ok", true));
   }
 

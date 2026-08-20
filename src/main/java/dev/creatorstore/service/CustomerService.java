@@ -20,13 +20,13 @@ public class CustomerService {
     return Map.of("items", customers.findAll(creatorId), "limit", 5000);
   }
 
-  public Map<String, Object> create(CustomerRequest request) {
+  public Map<String, Object> create(long creatorId, CustomerRequest request) {
     if (request.email() == null || !request.email().contains("@") || request.name() == null
         || request.name().isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name and valid email are required");
     }
     try {
-      return customers.create(request.creatorId(), request.name(), request.email().toLowerCase(), request.phone());
+      return customers.create(creatorId, request.name(), request.email().toLowerCase(), request.phone());
     } catch (DataIntegrityViolationException conflict) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "customer already exists");
     }

@@ -15,7 +15,7 @@ public class ProductService {
     this.products = products;
   }
 
-  public Map<String, Object> create(ProductRequest request) {
+  public Map<String, Object> create(long creatorId, ProductRequest request) {
     if (!StoreService.PRODUCT_TYPES.contains(request.type())) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported product type");
     }
@@ -25,7 +25,7 @@ public class ProductService {
           "title, description, and a non-negative priceSubunits are required");
     }
     String status = request.status() == null ? "draft" : request.status();
-    return products.create(request.creatorId(), request.type(), request.title(), request.description(),
+    return products.create(creatorId, request.type(), request.title(), request.description(),
         request.priceSubunits(), status, request.position());
   }
 }
