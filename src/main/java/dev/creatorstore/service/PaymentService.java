@@ -1,5 +1,7 @@
 package dev.creatorstore.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.creatorstore.dto.CheckoutRequest;
 import dev.creatorstore.dto.RazorpayReturnRequest;
 import dev.creatorstore.integration.PaymentProviderClient;
@@ -29,12 +31,13 @@ public class PaymentService {
   private final CheckoutRepository checkouts;
   private final Map<String, PaymentProviderClient> providerClients;
   private final RazorpayClient razorpay;
+  private final ObjectMapper json;
   private final String paymentMode;
   private final String defaultProvider;
   private final String razorpayKeySecret;
 
   public PaymentService(ProductRepository products, CheckoutRepository checkouts,
-      List<PaymentProviderClient> providerClients, RazorpayClient razorpay,
+      List<PaymentProviderClient> providerClients, RazorpayClient razorpay, ObjectMapper json,
       @Value("${payments.mode:disabled}") String paymentMode,
       @Value("${payments.default-provider:razorpay}") String defaultProvider,
       @Value("${payments.razorpay.key-secret:}") String razorpayKeySecret) {
@@ -43,6 +46,7 @@ public class PaymentService {
     this.providerClients = providerClients.stream().collect(
         Collectors.toUnmodifiableMap(PaymentProviderClient::provider, Function.identity()));
     this.razorpay = razorpay;
+    this.json = json;
     this.paymentMode = paymentMode;
     this.defaultProvider = defaultProvider;
     this.razorpayKeySecret = razorpayKeySecret;
@@ -63,6 +67,12 @@ public class PaymentService {
     if (idempotencyKey.isBlank() || idempotencyKey.length() > 120) {
       return HttpResult.error(400, "Idempotency-Key is required and must be at most 120 characters.");
     }
+    String buyerEmail = input.buyerEmail() == null ? "" : input.buyerEmail().trim().toLowerCase(Locale.ROOT);
+    if (!buyerEmail.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
+      return HttpResult.error(400, "A valid buyerEmail is required.");
+    }
+    String buyerName = Values.optional(input.buyerName(), "").trim();
+    if (buyerName.length() > 120) return HttpResult.error(400, "buyerName must be at most 120 characters.");
     List<Map<String, Object>> existing = checkouts.findByIdempotencyKey(input.creatorId(), idempotencyKey);
     if (!existing.isEmpty()) return HttpResult.ok(existing.get(0));
     List<Map<String, Object>> rows = products.findCheckoutProduct(input.productId(), input.creatorId());
@@ -71,6 +81,17 @@ public class PaymentService {
     String currency = String.valueOf(product.get("currency")).trim().toUpperCase(Locale.ROOT);
     if (!currency.equals("INR")) return HttpResult.error(400, "India launch checkout currently requires INR.");
     int amount = ((Number) product.get("amount_subunits")).intValue();
+    if (input.planId() != null) {
+      List<Map<String, Object>> plans = checkouts.findPlan(input.planId(), input.productId());
+      if (plans.isEmpty()) return HttpResult.error(400, "Plan not found for this product.");
+      amount = ((Number) plans.get(0).get("amount_subunits")).intValue();
+    }
+    if (input.slotId() != null && !checkouts.isOpenSlot(input.slotId(), input.productId())) {
+      return HttpResult.error(400, "Meeting slot is unavailable or does not belong to this product.");
+    }
+    Map<String, String> fieldResponses = input.fieldResponses() == null ? Map.of() : input.fieldResponses();
+    HttpResult fieldError = validateCheckoutFields(input.productId(), fieldResponses);
+    if (fieldError != null) return fieldError;
     if (amount <= 0) return HttpResult.error(400, "Free products do not use a payment gateway.");
     String provider = Values.optional(input.provider(), defaultProvider).toLowerCase(Locale.ROOT);
     PaymentProviderClient client = providerClients.get(provider);
@@ -83,7 +104,8 @@ public class PaymentService {
     String checkoutId = UUID.randomUUID().toString();
     try {
       checkouts.create(checkoutId, input.creatorId(), input.productId(), provider,
-          idempotencyKey, currency, amount);
+          idempotencyKey, currency, amount, buyerEmail, buyerName,
+          serialize(fieldResponses), input.slotId(), input.planId());
     } catch (DataIntegrityViolationException concurrentRequest) {
       return HttpResult.ok(checkouts.findOneByIdempotencyKey(input.creatorId(), idempotencyKey));
     }
@@ -110,6 +132,36 @@ public class PaymentService {
       checkouts.providerFailed(checkoutId);
       return HttpResult.error(502,
           "Payment provider request failed; no local paid order was created.");
+    }
+  }
+
+  private HttpResult validateCheckoutFields(long productId, Map<String, String> responses) {
+    List<Map<String, Object>> fields = checkouts.checkoutFields(productId);
+    Set<String> allowed = fields.stream().map(field -> String.valueOf(field.get("id")))
+        .collect(Collectors.toSet());
+    if (!allowed.containsAll(responses.keySet())) {
+      return HttpResult.error(400, "fieldResponses contains a field that does not belong to this product.");
+    }
+    for (Map<String, Object> field : fields) {
+      if (Boolean.TRUE.equals(field.get("required"))) {
+        String value = responses.get(String.valueOf(field.get("id")));
+        if (value == null || value.isBlank()) {
+          return HttpResult.error(400, "Required checkout field is missing: " + field.get("label"));
+        }
+      }
+    }
+    if (responses.values().stream().anyMatch(value -> value != null && value.length() > 2000)) {
+      return HttpResult.error(400, "Checkout field responses must be at most 2000 characters.");
+    }
+    return null;
+  }
+
+  private String serialize(Map<String, String> value) {
+    if (value.isEmpty()) return null;
+    try {
+      return json.writeValueAsString(value);
+    } catch (JsonProcessingException impossibleForStringMap) {
+      throw new IllegalArgumentException("Invalid checkout field responses.", impossibleForStringMap);
     }
   }
 

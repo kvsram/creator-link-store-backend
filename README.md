@@ -22,11 +22,11 @@ India launch defaults are `INR`, Razorpay as the preferred strategy, and both pa
 
 ## Authentication
 
-`POST /api/auth/register` creates a creator (BCrypt-hashed password). `POST /api/auth/login` (handle-or-email + password) issues an httpOnly session cookie backed by the `sessions` table (30-day opaque token, hashed at rest — no JWT, no extra secret to manage). `POST /api/auth/logout` revokes it, `GET /api/auth/me` returns the current profile. Every `/api/v1/**` route requires this session except the public/webhook/checkout paths a buyer or payment provider needs to hit anonymously — see `identity/AuthInterceptor.java` for the exact allowlist. There is no client-supplied `creatorId` trusted anywhere anymore; it's always resolved server-side from the session.
+`POST /api/auth/register` creates a creator (BCrypt-hashed password). `POST /api/auth/login` (handle-or-email + password) issues an httpOnly session cookie backed by the `sessions` table (30-day opaque token, hashed at rest — no JWT, no extra secret to manage). `POST /api/auth/logout` revokes it, `GET /api/auth/me` returns the current profile. Every `/api/v1/**` route requires this session except the public/webhook/checkout paths a buyer or payment provider needs to hit anonymously — see `identity/AuthInterceptor.java` for the exact allowlist. Authenticated creator APIs resolve `creatorId` only from the session. Public checkout accepts the storefront creator ID but verifies that the published product, selected plan, meeting slot, and checkout fields all belong to that product before contacting a payment provider.
 
 ## Product types
 
-The schema and webhook fulfillment service imported from Sai cover all 8 types (`digital-download`, `lead-magnet`, `fulfillment`, `meeting`, `webinar`, `community`, `membership`, `course`). The current layered API still needs the type-specific authoring and buyer-access controllers ported from Sai's monolithic controller before all eight flows can honestly be called end to end. Compiling the service is not endpoint proof.
+The schema and webhook fulfillment service imported from Sai cover all 8 types (`digital-download`, `lead-magnet`, `fulfillment`, `meeting`, `webinar`, `community`, `membership`, `course`). Paid checkout now requires `buyerEmail`, accepts optional `buyerName`, `fieldResponses`, `slotId`, and `planId`, persists those selections, and uses a validated payment-plan amount. The current layered API still needs the type-specific authoring and buyer-access controllers ported from Sai's monolithic controller before all eight flows can honestly be called end to end. Compiling the service is not endpoint proof.
 
 ## Instagram Auto DM
 

@@ -20,9 +20,31 @@ public class CheckoutRepository {
   }
 
   public void create(String checkoutId, long creatorId, long productId, String provider,
-                     String idempotencyKey, String currency, int amountSubunits) {
-    database.update("insert into checkout_sessions(id,creator_id,product_id,provider,idempotency_key,currency,amount_subunits,status) values(?,?,?,?,?,?,?,?)",
-        checkoutId, creatorId, productId, provider, idempotencyKey, currency, amountSubunits, "creating");
+                     String idempotencyKey, String currency, int amountSubunits,
+                     String buyerEmail, String buyerName, String fieldResponses,
+                     Long slotId, Long planId) {
+    database.update("insert into checkout_sessions(id,creator_id,product_id,provider,idempotency_key,currency,amount_subunits,status,buyer_email,buyer_name,field_responses,slot_id,plan_id) values(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        checkoutId, creatorId, productId, provider, idempotencyKey, currency, amountSubunits,
+        "creating", buyerEmail, buyerName, fieldResponses, slotId, planId);
+  }
+
+  public List<Map<String, Object>> findPlan(long planId, long productId) {
+    return database.queryForList(
+        "select id,amount_cents as amount_subunits from product_payment_plans where id=? and product_id=?",
+        planId, productId);
+  }
+
+  public boolean isOpenSlot(long slotId, long productId) {
+    Integer count = database.queryForObject(
+        "select count(*) from bookings where id=? and product_id=? and status='open' and starts_at>current_timestamp",
+        Integer.class, slotId, productId);
+    return count != null && count == 1;
+  }
+
+  public List<Map<String, Object>> checkoutFields(long productId) {
+    return database.queryForList(
+        "select id,label,required from product_checkout_fields where product_id=? order by position,id",
+        productId);
   }
 
   public Map<String, Object> findOneByIdempotencyKey(long creatorId, String idempotencyKey) {
