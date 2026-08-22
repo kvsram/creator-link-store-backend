@@ -28,6 +28,8 @@ India launch defaults are `INR`, Razorpay as the preferred strategy, and both pa
 
 The schema and webhook fulfillment service imported from Sai cover all 8 types (`digital-download`, `lead-magnet`, `fulfillment`, `meeting`, `webinar`, `community`, `membership`, `course`). Paid checkout now requires `buyerEmail`, accepts optional `buyerName`, `fieldResponses`, `slotId`, and `planId`, persists those selections, and uses a validated payment-plan amount. The current layered API still needs the type-specific authoring and buyer-access controllers ported from Sai's monolithic controller before all eight flows can honestly be called end to end. Compiling the service is not endpoint proof.
 
+`PATCH /api/v1/store` is the authenticated storefront-authoring boundary. It persists the public headline, tagline, visibility toggles, theme, accent color, background, button style, and font style after server-side allowlist validation. `GET /api/public/{handle}` returns the saved design so the admin phone preview and public storefront use the same model.
+
 ## Instagram Auto DM
 
 Signed comment webhooks can enqueue idempotent keyword rules through `/api/v1/automations/instagram-comment-rules`. Delivery uses a leased PostgreSQL queue, a seven-day private-reply expiry guard, bounded retries for retryable provider failures, and a permanent dead state for non-retryable failures. Instagram remains disabled until Meta App Review, per-creator OAuth token encryption, and the production gates in `docs/INSTAGRAM_AUTODM.md` are complete.

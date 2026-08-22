@@ -20,6 +20,14 @@ create table if not exists stores (
   payouts_enabled boolean not null default false
 );
 
+alter table stores add column if not exists tagline varchar(180) not null default 'Systems and templates for independent creators.';
+alter table stores add column if not exists accent_color varchar(7) not null default '#6842d7';
+alter table stores add column if not exists background_style varchar(30) not null default 'soft-gradient';
+alter table stores add column if not exists button_style varchar(20) not null default 'rounded';
+alter table stores add column if not exists font_style varchar(20) not null default 'modern';
+alter table stores add column if not exists show_products boolean not null default true;
+alter table stores add column if not exists show_links boolean not null default true;
+
 create table if not exists links (
   id bigserial primary key,
   creator_id bigint not null references creators(id) on delete cascade,

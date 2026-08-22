@@ -15,7 +15,8 @@ public class StoreRepository {
 
   public List<Map<String, Object>> findPublished(long creatorId) {
     return database.queryForList(
-        "select title,theme,currency from stores where creator_id=? and published=true", creatorId);
+        "select title,tagline,theme,currency,accent_color,background_style,button_style,font_style,show_products,show_links from stores where creator_id=? and published=true",
+        creatorId);
   }
 
   public List<Map<String, Object>> findPublishedLinks(long creatorId) {
@@ -34,11 +35,11 @@ public class StoreRepository {
   }
 
   public Map<String, Object> findDetails(long creatorId) {
-    return first("select id,title,theme,currency,published,payouts_enabled from stores where creator_id=?", creatorId);
+    return first("select id,title,tagline,theme,currency,published,payouts_enabled,accent_color,background_style,button_style,font_style,show_products,show_links from stores where creator_id=?", creatorId);
   }
 
   public Map<String, Object> findSettings(long creatorId) {
-    return first("select title,theme,currency,published,payouts_enabled from stores where creator_id=?", creatorId);
+    return first("select title,tagline,theme,currency,published,payouts_enabled,accent_color,background_style,button_style,font_style,show_products,show_links from stores where creator_id=?", creatorId);
   }
 
   public String findCurrency(long creatorId) {
@@ -48,6 +49,15 @@ public class StoreRepository {
 
   public void createDefault(long creatorId, String title) {
     database.update("insert into stores(creator_id,title,currency) values(?,?,?)", creatorId, title, "INR");
+  }
+
+  public Map<String, Object> updateDesign(long creatorId, String title, String tagline,
+      String theme, String accentColor, String backgroundStyle, String buttonStyle,
+      String fontStyle, boolean showProducts, boolean showLinks) {
+    database.update("update stores set title=?,tagline=?,theme=?,accent_color=?,background_style=?,button_style=?,font_style=?,show_products=?,show_links=? where creator_id=?",
+        title, tagline, theme, accentColor, backgroundStyle, buttonStyle, fontStyle,
+        showProducts, showLinks, creatorId);
+    return findDetails(creatorId);
   }
 
   private Map<String, Object> first(String sql, Object... args) {
