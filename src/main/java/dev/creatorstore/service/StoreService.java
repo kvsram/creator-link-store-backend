@@ -3,6 +3,7 @@ package dev.creatorstore.service;
 import dev.creatorstore.dto.StoreDesignRequest;
 import dev.creatorstore.repository.ProductRepository;
 import dev.creatorstore.repository.StoreRepository;
+import dev.creatorstore.repository.PromotionRepository;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
@@ -13,18 +14,23 @@ import org.springframework.web.server.ResponseStatusException;
 public class StoreService {
   public static final List<String> PRODUCT_TYPES = List.of("lead-magnet", "digital-download",
       "meeting", "fulfillment", "course", "membership", "webinar", "community");
+  public static final List<String> STORE_ITEM_TYPES = List.of("lead-magnet", "digital-download",
+      "meeting", "fulfillment", "course", "membership", "webinar", "community", "url-media");
 
   private final StoreRepository stores;
   private final ProductRepository products;
+  private final PromotionRepository promotions;
 
-  public StoreService(StoreRepository stores, ProductRepository products) {
+  public StoreService(StoreRepository stores, ProductRepository products, PromotionRepository promotions) {
     this.stores = stores;
     this.products = products;
+    this.promotions = promotions;
   }
 
   public Map<String, Object> store(long creatorId) {
     return Map.of("store", stores.findDetails(creatorId),
-        "products", products.findAll(creatorId), "product_types", PRODUCT_TYPES);
+        "products", products.findAll(creatorId), "promotions", promotions.findAll(creatorId),
+        "product_types", STORE_ITEM_TYPES);
   }
 
   public Map<String, Object> updateDesign(long creatorId, StoreDesignRequest request) {

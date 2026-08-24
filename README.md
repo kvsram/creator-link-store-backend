@@ -28,7 +28,15 @@ India launch defaults are `INR`, Razorpay as the preferred strategy, and both pa
 
 The schema and webhook fulfillment service imported from Sai cover all 8 types (`digital-download`, `lead-magnet`, `fulfillment`, `meeting`, `webinar`, `community`, `membership`, `course`). Paid checkout now requires `buyerEmail`, accepts optional `buyerName`, `fieldResponses`, `slotId`, and `planId`, persists those selections, and uses a validated payment-plan amount. The current layered API still needs the type-specific authoring and buyer-access controllers ported from Sai's monolithic controller before all eight flows can honestly be called end to end. Compiling the service is not endpoint proof.
 
-`PATCH /api/v1/store` is the authenticated storefront-authoring boundary. It persists the public headline, tagline, visibility toggles, theme, accent color, background, button style, and font style after server-side allowlist validation. `GET /api/public/{handle}` returns the saved design so the admin phone preview and public storefront use the same model.
+Creator products support edit, draft/publish, protected deletion, and persistent pin/unpin. Promotions support the same persistent pin state. The phone preview is the creator-facing pinning surface, and the public storefront combines products and promotions into one pinned-first feed. Products referenced by customer or order history return HTTP `409` on deletion and should be unpublished instead, preserving commerce records.
+
+Type-specific authoring is persisted through `/api/v1/products/{id}/configuration`. The service allowlists thumbnail styles and validates download redirects, coaching duration/capacity/timezone, webinar time/capacity, course module structure, membership intervals, fulfillment turnaround, and community benefits. Authenticated multipart upload stores opaque object keys beneath `APP_STORAGE_DIR` and records file name, kind, content type, and byte size without exposing the server path. Production deployments must replace local disk with the configured cloud object-storage adapter plus malware scanning and signed delivery.
+
+`PATCH /api/v1/store` is the authenticated storefront-authoring boundary. It persists the public headline, tagline, visibility toggles, theme, accent color, background, button style, and font style after server-side allowlist validation. `GET /api/public/{handle}` returns the saved design so the admin phone preview and public storefront use the same headline and model.
+
+## Promotions and external links
+
+`url-media` appears as the ninth visual store-item type but is deliberately persisted separately from checkout products. `/api/v1/promotions` provides owner-scoped create/edit/delete/reorder/publish and schedule behavior with brand, image, CTA, coupon, offer, and disclosure metadata. Only absolute HTTPS destinations and thumbnails are accepted. Public reads filter draft, future, and expired records. `/api/events/click` validates that the link belongs to the supplied creator and is currently public before storing bounded attribution metadata, preventing arbitrary link-ID inflation.
 
 ## Instagram Auto DM
 

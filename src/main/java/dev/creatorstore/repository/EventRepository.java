@@ -16,7 +16,9 @@ public class EventRepository {
         creatorId, path, referrer);
   }
 
-  public void recordClick(long linkId, String referrer) {
-    database.update("insert into click_events(link_id,referrer) values(?,?)", linkId, referrer);
+  public void recordClick(long linkId, long creatorId, String path, String referrer,
+      String userAgent, String campaign) {
+    database.update("insert into click_events(link_id,creator_id,path,referrer,user_agent,campaign) values(?,?,?,?,?,?)",
+        linkId, creatorId, path, referrer, userAgent, campaign);
   }
 }

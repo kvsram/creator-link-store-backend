@@ -26,6 +26,7 @@ public class ReportingService {
   }
 
   public Map<String, Object> analytics(long creatorId) {
-    return Map.of("totals", metrics.metrics(creatorId), "sources", reporting.trafficSources(creatorId));
+    return Map.of("totals", metrics.metrics(creatorId), "sources", reporting.trafficSources(creatorId),
+        "promotions", reporting.promotionPerformance(creatorId));
   }
 }

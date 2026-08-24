@@ -37,6 +37,18 @@ create table if not exists links (
   published boolean not null default true
 );
 
+alter table links add column if not exists description varchar(500) not null default '';
+alter table links add column if not exists brand_name varchar(100) not null default '';
+alter table links add column if not exists thumbnail_url varchar(2048);
+alter table links add column if not exists call_to_action varchar(60) not null default 'Visit link';
+alter table links add column if not exists coupon_code varchar(80) not null default '';
+alter table links add column if not exists offer_text varchar(120) not null default '';
+alter table links add column if not exists disclosure varchar(160) not null default '';
+alter table links add column if not exists starts_at timestamptz;
+alter table links add column if not exists ends_at timestamptz;
+alter table links add column if not exists updated_at timestamptz not null default current_timestamp;
+alter table links add column if not exists pinned boolean not null default false;
+
 create table if not exists products (
   id bigserial primary key,
   creator_id bigint not null references creators(id) on delete cascade,
@@ -57,6 +69,11 @@ alter table products add column if not exists position integer not null default 
 alter table products add column if not exists thumbnail_url varchar(2048);
 alter table products add column if not exists fulfillment_url varchar(2048);
 alter table products add column if not exists created_at timestamptz not null default current_timestamp;
+alter table products add column if not exists pinned boolean not null default false;
+alter table products add column if not exists configuration_json text not null default '{}';
+alter table products add column if not exists subtitle varchar(160) not null default '';
+alter table products add column if not exists call_to_action varchar(60) not null default 'Get access';
+alter table products add column if not exists thumbnail_style varchar(20) not null default 'preview';
 
 create table if not exists product_payment_plans (
   id bigserial primary key,
@@ -73,6 +90,11 @@ create table if not exists product_files (
   file_name varchar(255) not null,
   object_key varchar(512) not null
 );
+
+alter table product_files add column if not exists content_type varchar(160) not null default 'application/octet-stream';
+alter table product_files add column if not exists size_bytes bigint not null default 0;
+alter table product_files add column if not exists kind varchar(30) not null default 'download';
+alter table product_files add column if not exists created_at timestamptz not null default current_timestamp;
 
 create table if not exists product_checkout_fields (
   id bigserial primary key,
@@ -151,6 +173,11 @@ create table if not exists click_events (
   referrer varchar(500)
 );
 
+alter table click_events add column if not exists creator_id bigint references creators(id) on delete cascade;
+alter table click_events add column if not exists path varchar(512);
+alter table click_events add column if not exists user_agent varchar(500);
+alter table click_events add column if not exists campaign varchar(160);
+
 create table if not exists integrations (
   id bigserial primary key,
   creator_id bigint not null references creators(id) on delete cascade,
@@ -223,6 +250,8 @@ create table if not exists bookings (
 );
 
 create index if not exists idx_products_creator_status on products(creator_id,status,position);
+create index if not exists idx_links_creator_published_position on links(creator_id,published,position);
+create index if not exists idx_click_events_creator_occurred on click_events(creator_id,occurred_at);
 create index if not exists idx_orders_creator_created on orders(creator_id,created_at desc);
 create index if not exists idx_visits_creator_time on store_visits(creator_id,occurred_at desc);
 create index if not exists idx_customers_creator_created on customers(creator_id,created_at desc);

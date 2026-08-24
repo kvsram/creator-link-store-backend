@@ -30,4 +30,10 @@ public class ReportingRepository {
         "select coalesce(referrer,'direct') as source,count(*) as visits from store_visits where creator_id=? group by coalesce(referrer,'direct') order by visits desc",
         creatorId);
   }
+
+  public List<Map<String, Object>> promotionPerformance(long creatorId) {
+    return database.queryForList(
+        "select l.id,l.title,l.brand_name,l.published,count(c.id) as clicks,count(distinct coalesce(c.referrer,'')) as sources,max(c.occurred_at) as last_clicked_at from links l left join click_events c on c.link_id=l.id and c.creator_id=l.creator_id where l.creator_id=? group by l.id,l.title,l.brand_name,l.published order by clicks desc,l.position,l.id",
+        creatorId);
+  }
 }

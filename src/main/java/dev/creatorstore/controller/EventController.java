@@ -3,6 +3,7 @@ package dev.creatorstore.controller;
 import dev.creatorstore.dto.ClickEventRequest;
 import dev.creatorstore.service.EventService;
 import java.util.Map;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -23,8 +24,8 @@ public class EventController {
   }
 
   @PostMapping("/api/events/click")
-  public ResponseEntity<Void> click(@RequestBody ClickEventRequest request) {
-    events.recordClick(request);
+  public ResponseEntity<Void> click(@RequestBody ClickEventRequest request, HttpServletRequest servletRequest) {
+    events.recordClick(request, servletRequest.getHeader("User-Agent"));
     return ResponseEntity.accepted().build();
   }
 }

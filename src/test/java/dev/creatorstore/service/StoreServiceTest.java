@@ -11,7 +11,7 @@ import org.springframework.web.server.ResponseStatusException;
 class StoreServiceTest {
   @Test
   void rejectsUnsupportedDesignValuesBeforeWritingToTheDatabase() {
-    StoreService service = new StoreService(null, null);
+    StoreService service = new StoreService(null, null, null);
     StoreDesignRequest request = new StoreDesignRequest("My Store", "A useful tagline",
         "javascript", "#6842d7", "soft-gradient", "rounded", "modern", true, true);
 

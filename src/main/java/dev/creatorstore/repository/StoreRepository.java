@@ -21,12 +21,12 @@ public class StoreRepository {
 
   public List<Map<String, Object>> findPublishedLinks(long creatorId) {
     return database.queryForList(
-        "select id,title,url from links where creator_id=? and published=true order by position,id", creatorId);
+        "select id,title,url,description,brand_name,thumbnail_url,call_to_action,coupon_code,offer_text,disclosure,position,pinned,starts_at,ends_at from links where creator_id=? and published=true and (starts_at is null or starts_at<=current_timestamp) and (ends_at is null or ends_at>current_timestamp) order by pinned desc,position,id", creatorId);
   }
 
   public List<Map<String, Object>> findPublishedProducts(long creatorId) {
     return database.queryForList(
-        "select id,type,title,description,price_cents as price_subunits,price_cents,thumbnail_url from products where creator_id=? and status='published' order by position,id",
+        "select id,type,title,subtitle,call_to_action,thumbnail_style,description,price_cents as price_subunits,price_cents,thumbnail_url,pinned from products where creator_id=? and status='published' order by pinned desc,position,id",
         creatorId);
   }
 
