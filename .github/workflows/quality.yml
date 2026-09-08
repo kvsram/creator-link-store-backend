@@ -16,4 +16,7 @@ jobs:
             kubectl kustomize "deploy/overlays/$region" >/dev/null
           done
       - uses: aquasecurity/trivy-action@v0.36.0
-        with: { scan-type: fs, severity: HIGH,CRITICAL, exit-code: '1' }
+        with:
+          scan-type: fs
+          severity: HIGH,CRITICAL
+          exit-code: '1'
