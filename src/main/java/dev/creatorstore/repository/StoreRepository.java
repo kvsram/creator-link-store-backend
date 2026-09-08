@@ -26,7 +26,7 @@ public class StoreRepository {
 
   public List<Map<String, Object>> findPublishedProducts(long creatorId) {
     return database.queryForList(
-        "select id,type,title,subtitle,call_to_action,thumbnail_style,description,price_cents as price_subunits,price_cents,thumbnail_url,pinned from products where creator_id=? and status='published' order by pinned desc,position,id",
+        "select id,type,title,subtitle,call_to_action,thumbnail_style,description,price_cents as price_subunits,price_cents,thumbnail_url,pinned,position,configuration_json from products where creator_id=? and status='published' order by pinned desc,position,id",
         creatorId);
   }
 

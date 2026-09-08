@@ -74,6 +74,9 @@ alter table products add column if not exists configuration_json text not null d
 alter table products add column if not exists subtitle varchar(160) not null default '';
 alter table products add column if not exists call_to_action varchar(60) not null default 'Get access';
 alter table products add column if not exists thumbnail_style varchar(20) not null default 'preview';
+alter table products add column if not exists idempotency_key varchar(120);
+create unique index if not exists idx_products_creator_idempotency
+  on products(creator_id,idempotency_key) where idempotency_key is not null;
 
 create table if not exists product_payment_plans (
   id bigserial primary key,
@@ -240,6 +243,9 @@ create table if not exists availability_schedules (
   timezone varchar(80) not null
 );
 
+alter table availability_schedules add column if not exists product_id bigint references products(id) on delete cascade;
+create unique index if not exists idx_availability_product_unique on availability_schedules(product_id);
+
 create table if not exists bookings (
   id bigserial primary key,
   schedule_id bigint not null references availability_schedules(id) on delete cascade,
@@ -332,6 +338,7 @@ create table if not exists order_field_responses (
 );
 
 alter table bookings add column if not exists product_id bigint references products(id);
+create index if not exists idx_bookings_product_start on bookings(product_id,starts_at);
 alter table checkout_sessions add column if not exists slot_id bigint references bookings(id);
 
 create table if not exists webinar_sessions (
@@ -342,6 +349,8 @@ create table if not exists webinar_sessions (
   join_url varchar(2048) not null,
   capacity integer not null default 0
 );
+
+create index if not exists idx_webinar_sessions_product_start on webinar_sessions(product_id,starts_at);
 
 create table if not exists webinar_registrations (
   id bigserial primary key,
@@ -362,12 +371,17 @@ create table if not exists membership_subscriptions (
   status varchar(20) not null default 'active'
 );
 
+create index if not exists idx_payment_plans_product on product_payment_plans(product_id);
+
 create table if not exists course_modules (
   id bigserial primary key,
   product_id bigint not null references products(id) on delete cascade,
   title varchar(120) not null,
   position integer not null default 0
 );
+
+alter table course_modules add column if not exists description varchar(2000) not null default '';
+create index if not exists idx_course_modules_product on course_modules(product_id,position);
 
 create table if not exists course_lessons (
   id bigserial primary key,

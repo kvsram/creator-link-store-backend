@@ -78,14 +78,23 @@ public class PaymentService {
     List<Map<String, Object>> rows = products.findCheckoutProduct(input.productId(), input.creatorId());
     if (rows.isEmpty()) return HttpResult.error(404, "Published product not found for this creator.");
     Map<String, Object> product = rows.get(0);
+    String productType = String.valueOf(product.get("type"));
     String currency = String.valueOf(product.get("currency")).trim().toUpperCase(Locale.ROOT);
     if (!currency.equals("INR")) return HttpResult.error(400, "India launch checkout currently requires INR.");
     int amount = ((Number) product.get("amount_subunits")).intValue();
+    if ("membership".equals(productType) && input.planId() == null)
+      return HttpResult.error(400, "A membership plan is required for this product.");
+    if (!"membership".equals(productType) && input.planId() != null)
+      return HttpResult.error(400, "A membership plan cannot be used for this product type.");
     if (input.planId() != null) {
       List<Map<String, Object>> plans = checkouts.findPlan(input.planId(), input.productId());
       if (plans.isEmpty()) return HttpResult.error(400, "Plan not found for this product.");
       amount = ((Number) plans.get(0).get("amount_subunits")).intValue();
     }
+    if ("meeting".equals(productType) && input.slotId() == null)
+      return HttpResult.error(400, "An available meeting slot is required for this product.");
+    if (!"meeting".equals(productType) && input.slotId() != null)
+      return HttpResult.error(400, "A meeting slot cannot be used for this product type.");
     if (input.slotId() != null && !checkouts.isOpenSlot(input.slotId(), input.productId())) {
       return HttpResult.error(400, "Meeting slot is unavailable or does not belong to this product.");
     }

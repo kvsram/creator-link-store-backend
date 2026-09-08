@@ -12,10 +12,13 @@ import org.springframework.stereotype.Service;
 public class CreatorService {
   private final CreatorRepository creators;
   private final StoreRepository stores;
+  private final ProductConfigurationService configurations;
 
-  public CreatorService(CreatorRepository creators, StoreRepository stores) {
+  public CreatorService(CreatorRepository creators, StoreRepository stores,
+      ProductConfigurationService configurations) {
     this.creators = creators;
     this.stores = stores;
+    this.configurations = configurations;
   }
 
   public Optional<Map<String, Object>> publicPage(String handle) {
@@ -29,7 +32,8 @@ public class CreatorService {
     response.put("creator", creator);
     response.put("store", storeRows.get(0));
     response.put("links", stores.findPublishedLinks(creatorId));
-    response.put("products", stores.findPublishedProducts(creatorId));
+    response.put("products", stores.findPublishedProducts(creatorId).stream()
+        .map(configurations::publicProduct).toList());
     return Optional.of(response);
   }
 

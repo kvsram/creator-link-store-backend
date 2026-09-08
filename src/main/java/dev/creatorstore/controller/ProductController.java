@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -36,8 +37,10 @@ public class ProductController {
 
   @PostMapping("/api/v1/products")
   public ResponseEntity<Map<String, Object>> create(@RequestBody ProductRequest request,
+      @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
       HttpServletRequest servletRequest) {
-    return ResponseEntity.status(201).body(products.create(AuthenticatedCreator.id(servletRequest), request));
+    return ResponseEntity.status(201).body(products.create(
+        AuthenticatedCreator.id(servletRequest), idempotencyKey, request));
   }
 
   @PatchMapping("/api/v1/products/{id}")
@@ -64,6 +67,11 @@ public class ProductController {
     return configurations.update(AuthenticatedCreator.id(request), id, body);
   }
 
+  @GetMapping("/api/v1/products/{id}/configuration")
+  public Map<String, Object> configuration(@PathVariable long id, HttpServletRequest request) {
+    return configurations.creatorDetails(AuthenticatedCreator.id(request), id);
+  }
+
   @PostMapping(value = "/api/v1/products/{id}/files", consumes = "multipart/form-data")
   public ResponseEntity<Map<String, Object>> upload(@PathVariable long id,
       @RequestParam(defaultValue = "download") String kind,
@@ -74,5 +82,12 @@ public class ProductController {
   @GetMapping("/api/v1/products/{id}/files")
   public java.util.List<Map<String, Object>> files(@PathVariable long id, HttpServletRequest request) {
     return files.files(AuthenticatedCreator.id(request), id);
+  }
+
+  @DeleteMapping("/api/v1/products/{productId}/files/{fileId}")
+  public ResponseEntity<Void> deleteFile(@PathVariable long productId, @PathVariable long fileId,
+      HttpServletRequest request) {
+    files.delete(AuthenticatedCreator.id(request), productId, fileId);
+    return ResponseEntity.noContent().build();
   }
 }

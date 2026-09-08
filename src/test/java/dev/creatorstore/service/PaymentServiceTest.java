@@ -50,7 +50,7 @@ class PaymentServiceTest {
 
   @Test
   void rejectsPlanFromAnotherProduct() throws Exception {
-    when(products.findCheckoutProduct(2, 1)).thenReturn(List.of(product()));
+    when(products.findCheckoutProduct(2, 1)).thenReturn(List.of(product("membership")));
     when(checkouts.findPlan(99, 2)).thenReturn(List.of());
 
     HttpResult result = service.createCheckout("key-2",
@@ -64,26 +64,40 @@ class PaymentServiceTest {
 
   @Test
   void persistsValidatedBuyerSelectionsAndUsesPlanAmount() throws Exception {
-    when(products.findCheckoutProduct(2, 1)).thenReturn(List.of(product()));
+    when(products.findCheckoutProduct(2, 1)).thenReturn(List.of(product("membership")));
     when(checkouts.findPlan(9, 2)).thenReturn(List.of(Map.of("id", 9L, "amount_subunits", 70000)));
-    when(checkouts.isOpenSlot(7, 2)).thenReturn(true);
     when(checkouts.checkoutFields(2)).thenReturn(
         List.of(Map.of("id", 5L, "label", "Goal", "required", true)));
     when(razorpay.createSession(any())).thenReturn(new ProviderSession("order_123", null));
 
     HttpResult result = service.createCheckout("key-3",
         new CheckoutRequest(1, 2, null, " Buyer@Example.COM ", " A Buyer ",
-            Map.of("5", "Learn architecture"), 7L, 9L));
+            Map.of("5", "Learn architecture"), null, 9L));
 
     assertEquals(201, result.status());
     verify(checkouts).create(any(), eq(1L), eq(2L), eq("razorpay"), eq("key-3"), eq("INR"),
         eq(70000), eq("buyer@example.com"), eq("A Buyer"),
-        eq("{\"5\":\"Learn architecture\"}"), eq(7L), eq(9L));
+        eq("{\"5\":\"Learn architecture\"}"), eq(null), eq(9L));
     verify(razorpay).createSession(any());
   }
 
-  private static Map<String, Object> product() {
-    return Map.of("id", 2L, "creator_id", 1L, "title", "Session",
+  @Test
+  void requiresPlanForMembershipAndSlotForMeeting() throws Exception {
+    when(products.findCheckoutProduct(2, 1)).thenReturn(List.of(product("membership")));
+    HttpResult missingPlan = service.createCheckout("key-membership",
+        new CheckoutRequest(1, 2, null, "buyer@example.com", "Buyer", Map.of(), null, null));
+
+    when(products.findCheckoutProduct(3, 1)).thenReturn(List.of(product("meeting")));
+    HttpResult missingSlot = service.createCheckout("key-meeting",
+        new CheckoutRequest(1, 3, null, "buyer@example.com", "Buyer", Map.of(), null, null));
+
+    assertEquals(400, missingPlan.status());
+    assertEquals(400, missingSlot.status());
+    verify(razorpay, never()).createSession(any());
+  }
+
+  private static Map<String, Object> product(String type) {
+    return Map.of("id", 2L, "creator_id", 1L, "type", type, "title", "Session",
         "amount_subunits", 90000, "currency", "INR", "handle", "creator");
   }
 }
