@@ -6,6 +6,10 @@ app:
   storage-dir: ${APP_STORAGE_DIR:./data/uploads}
   secure-cookies: ${APP_SECURE_COOKIES:false}
 spring:
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/creatorstore}
     username: ${DB_USER:creator}
