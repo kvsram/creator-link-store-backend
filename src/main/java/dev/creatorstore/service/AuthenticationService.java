@@ -6,10 +6,7 @@ import dev.creatorstore.repository.CreatorRepository;
 import dev.creatorstore.repository.FeatureRepository;
 import dev.creatorstore.repository.StoreRepository;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.regex.Pattern;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -19,14 +16,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AuthenticationService {
-  private static final Pattern HANDLE = Pattern.compile("[a-zA-Z0-9_]{3,40}");
-  private static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
-  private static final Pattern PHONE = Pattern.compile("^[+()0-9 .-]{7,32}$");
-  private static final Set<String> RESERVED_HANDLES = Set.of(
-      "about", "admin", "api", "assets", "dashboard", "features", "health", "help",
-      "login", "logout", "pricing", "privacy", "register", "settings", "signup",
-      "static", "support", "terms", "www");
-
   private final CreatorRepository creators;
   private final StoreRepository stores;
   private final FeatureRepository features;
@@ -45,8 +34,9 @@ public class AuthenticationService {
 
   public Map<String, Object> uniqueness(Map<String, Object> body) {
     Object suppliedHandle = body.containsKey("handle") ? body.get("handle") : body.get("username");
-    String handle = normalized(suppliedHandle);
-    boolean handleTaken = RESERVED_HANDLES.contains(handle)
+    String handle = CreatorIdentityPolicy.normalizeHandle(suppliedHandle);
+    boolean handleTaken = !CreatorIdentityPolicy.isValidHandle(handle)
+        || CreatorIdentityPolicy.isReservedHandle(handle)
         || (!handle.isBlank() && creators.handleExists(handle));
     // Keep username_taken during the frontend migration, but never expose email existence.
     return Map.of("handle_taken", handleTaken, "username_taken", handleTaken,
@@ -59,21 +49,21 @@ public class AuthenticationService {
       throw invalidRegistration();
     }
 
-    String handle = normalized(request.handle());
-    String displayName = trimmed(request.displayName());
-    String email = normalized(request.email());
-    String phone = nullableTrimmed(request.phone());
+    String handle = CreatorIdentityPolicy.normalizeHandle(request.handle());
+    String displayName = CreatorIdentityPolicy.trim(request.displayName());
+    String email = CreatorIdentityPolicy.normalizeEmail(request.email());
+    String phone = CreatorIdentityPolicy.nullablePhone(request.phone());
     String password = request.password();
 
-    if (!HANDLE.matcher(handle).matches()
+    if (!CreatorIdentityPolicy.isValidHandle(handle)
         || displayName.isBlank() || displayName.length() > 80
-        || !EMAIL.matcher(email).matches() || email.length() > 255
-        || (phone != null && !PHONE.matcher(phone).matches())
+        || !CreatorIdentityPolicy.isValidEmail(email)
+        || !CreatorIdentityPolicy.isValidPhone(phone)
         || password == null || password.length() < 8
         || password.getBytes(StandardCharsets.UTF_8).length > 72) {
       throw invalidRegistration();
     }
-    if (RESERVED_HANDLES.contains(handle)) {
+    if (CreatorIdentityPolicy.isReservedHandle(handle)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
           "That handle is reserved for an application page. Choose another handle.");
     }
@@ -94,19 +84,6 @@ public class AuthenticationService {
     return new ResponseStatusException(HttpStatus.BAD_REQUEST,
         "Use a 3-40 character handle, display name, valid email, optional valid phone, "
             + "and an 8-72 byte password.");
-  }
-
-  private static String normalized(Object value) {
-    return trimmed(value).toLowerCase(Locale.ROOT);
-  }
-
-  private static String trimmed(Object value) {
-    return value == null ? "" : String.valueOf(value).trim();
-  }
-
-  private static String nullableTrimmed(Object value) {
-    String result = trimmed(value);
-    return result.isBlank() ? null : result;
   }
 
   public record Registration(Map<String, Object> account,
