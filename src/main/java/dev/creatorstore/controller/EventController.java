@@ -1,6 +1,7 @@
 package dev.creatorstore.controller;
 
 import dev.creatorstore.dto.ClickEventRequest;
+import dev.creatorstore.dto.StoreViewRequest;
 import dev.creatorstore.service.EventService;
 import java.util.Map;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,7 +20,13 @@ public class EventController {
 
   @PostMapping("/events")
   public ResponseEntity<Map<String, Object>> analytics(@RequestBody Map<String, Object> event) {
-    events.recordAnalytics(event);
+    events.recordLegacyAnalytics(event);
+    return ResponseEntity.accepted().body(Map.of("accepted", true));
+  }
+
+  @PostMapping("/api/events/view")
+  public ResponseEntity<Map<String, Object>> view(@RequestBody StoreViewRequest request) {
+    events.recordView(request);
     return ResponseEntity.accepted().body(Map.of("accepted", true));
   }
 

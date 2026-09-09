@@ -169,6 +169,15 @@ create table if not exists leads (
   created_at timestamptz not null default current_timestamp
 );
 
+alter table leads add column if not exists name varchar(120);
+alter table leads add column if not exists phone varchar(32);
+alter table leads add column if not exists consent_given boolean not null default false;
+alter table leads add column if not exists consent_text varchar(500);
+alter table leads add column if not exists idempotency_key varchar(120);
+alter table leads add column if not exists request_fingerprint varchar(64);
+create unique index if not exists idx_leads_product_idempotency
+  on leads(product_id,idempotency_key) where idempotency_key is not null;
+
 create table if not exists click_events (
   id bigserial primary key,
   link_id bigint not null references links(id) on delete cascade,

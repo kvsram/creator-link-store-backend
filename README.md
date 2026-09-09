@@ -22,15 +22,49 @@ India launch defaults are `INR`, Razorpay as the preferred strategy, and both pa
 
 ## Authentication
 
-`POST /api/auth/register` creates a creator (BCrypt-hashed password). `POST /api/auth/login` (handle-or-email + password) issues an httpOnly session cookie backed by the `sessions` table (30-day opaque token, hashed at rest — no JWT, no extra secret to manage). `POST /api/auth/logout` revokes it, `GET /api/auth/me` returns the current profile. Every `/api/v1/**` route requires this session except the public/webhook/checkout paths a buyer or payment provider needs to hit anonymously — see `identity/AuthInterceptor.java` for the exact allowlist. Authenticated creator APIs resolve `creatorId` only from the session. Public checkout accepts the storefront creator ID but verifies that the published product, selected plan, meeting slot, and checkout fields all belong to that product before contacting a payment provider.
+`POST /api/auth/register` creates a creator (BCrypt-hashed password) and immediately issues
+the same httpOnly session cookie used by login. Creator, default store, notification preferences,
+and the hashed session are inserted in one database transaction; a failed insert leaves no partial
+account. The cookie carries a 30-day opaque token while only its SHA-256 hash is stored — no JWT
+or additional signing secret is required. `POST /api/auth/login` (handle-or-email + password)
+issues another session, `POST /api/auth/logout` revokes it, and `GET /api/auth/me` returns the
+current profile. Every `/api/v1/**` route requires this session except the
+public/webhook/checkout paths a buyer or payment provider needs to hit anonymously — see
+`identity/AuthInterceptor.java` for the exact allowlist. Authenticated creator APIs resolve
+`creatorId` only from the session. Public checkout accepts the storefront creator ID but verifies
+that the published product, selected plan, meeting slot, and checkout fields all belong to that
+product before contacting a payment provider.
+
+Registration accepts `handle`, `displayName`, `email`, optional `phone`, and `password`. It
+normalizes identity fields, rejects application-route handles such as `login`, `signup`,
+`dashboard`, and `api`, and creates the creator's free store plus notification defaults in one
+transaction. It does **not** accept or persist card numbers, CVVs, bank details, or a client-asserted
+premium entitlement. Premium signup must be implemented as a separate, authenticated
+provider-hosted/tokenized checkout: the provider returns an opaque payment-method/customer ID,
+and only a verified payment webhook may activate the paid subscription. Until that creator-billing
+model exists, the registration response honestly reports `plan: "free"`.
+
+`POST /api/v1/authentication/check-unique-taken` checks only the public store handle. It returns
+`handle_taken`, the compatibility alias `username_taken`, and `available`; it deliberately ignores
+email and never discloses whether an email address is registered. Duplicate registration still
+returns one generic handle-or-email conflict, and the public edge should rate-limit both endpoints.
 
 ## Product types
 
-The schema and webhook fulfillment service imported from Sai cover all 8 types (`digital-download`, `lead-magnet`, `fulfillment`, `meeting`, `webinar`, `community`, `membership`, `course`). Paid checkout now requires `buyerEmail`, accepts optional `buyerName`, `fieldResponses`, `slotId`, and `planId`, persists those selections, and uses a validated payment-plan amount. The current layered API still needs the type-specific authoring and buyer-access controllers ported from Sai's monolithic controller before all eight flows can honestly be called end to end. Compiling the service is not endpoint proof.
+The schema and layered product service cover all 8 types (`digital-download`, `lead-magnet`, `fulfillment`, `meeting`, `webinar`, `community`, `membership`, `course`). Paid checkout requires `buyerEmail`, accepts optional `buyerName`, `fieldResponses`, `slotId`, and `planId`, persists those selections, and uses a validated payment-plan amount. Creator-side type-specific authoring is implemented; most separate buyer delivery/access workflows remain partial, as documented below and in the infrastructure repository's feature matrix. Compiling the service is not endpoint proof.
 
 Creator products support edit, draft/publish, protected deletion, and persistent pin/unpin. Promotions support the same persistent pin state. The phone preview is the creator-facing pinning surface, and the public storefront combines products and promotions into one pinned-first feed. Products referenced by customer or order history return HTTP `409` on deletion and should be unpublished instead, preserving commerce records.
 
 Type-specific authoring is persisted through `/api/v1/products/{id}/configuration`. The service allowlists thumbnail styles and validates download redirects, coaching duration/capacity/timezone, webinar time/capacity, course module structure, membership intervals, fulfillment turnaround, and community benefits. Authenticated multipart upload stores opaque object keys beneath `APP_STORAGE_DIR` and records file name, kind, content type, and byte size without exposing the server path. Production deployments must replace local disk with the configured cloud object-storage adapter plus malware scanning and signed delivery.
+
+Published lead magnets accept public submissions at
+`POST /api/public/products/{productId}/leads`. The endpoint requires an `Idempotency-Key`, derives
+the creator from the published product, rejects a mismatched compatibility `creatorId`, and applies
+the product's configured name, phone, and consent requirements. It stores normalized contact data,
+the exact consent-text snapshot, and a request fingerprint. Identical key replays return the same
+generic `{ "accepted": true }` result; reusing a key for different input returns `409`. No product
+file path or redirect URL is returned. Capturing a lead does not yet send email—the eventual email
+worker must deliver a short-lived signed link rather than expose the private fulfillment URL.
 
 `PATCH /api/v1/store` is the authenticated storefront-authoring boundary. It persists the public headline, tagline, visibility toggles, theme, accent color, background, button style, and font style after server-side allowlist validation. `GET /api/public/{handle}` returns the saved design so the admin phone preview and public storefront use the same headline and model.
 
@@ -38,9 +72,21 @@ Type-specific authoring is persisted through `/api/v1/products/{id}/configuratio
 
 `url-media` appears as the ninth visual store-item type but is deliberately persisted separately from checkout products. `/api/v1/promotions` provides owner-scoped create/edit/delete/reorder/publish and schedule behavior with brand, image, CTA, coupon, offer, and disclosure metadata. Only absolute HTTPS destinations and thumbnails are accepted. Public reads filter draft, future, and expired records. `/api/events/click` validates that the link belongs to the supplied creator and is currently public before storing bounded attribution metadata, preventing arbitrary link-ID inflation.
 
+`POST /api/events/view` accepts `{handle, path, referrer}`. It resolves the published storefront by
+normalized handle, verifies that the path belongs to that handle, stores a canonical server-derived
+path, and bounds referrer metadata before recording the visit. The legacy `POST /events` page-view
+shape remains available, but now resolves a published storefront and cross-checks any supplied
+creator ID instead of trusting an arbitrary tenant ID.
+
 ## Instagram Auto DM
 
 Signed comment webhooks can enqueue idempotent keyword rules through `/api/v1/automations/instagram-comment-rules`. Delivery uses a leased PostgreSQL queue, a seven-day private-reply expiry guard, bounded retries for retryable provider failures, and a permanent dead state for non-retryable failures. Instagram remains disabled until Meta App Review, per-creator OAuth token encryption, and the production gates in `docs/INSTAGRAM_AUTODM.md` are complete.
+
+The current test tier does not yet have a trustworthy creator-subscription ledger, verified
+creator-billing webhook, or server-side Premium entitlement check for Auto DM. Keep Instagram in
+`disabled` or tightly controlled `test` mode; do not advertise or enable the live mutation path as
+a paid entitlement until those backend controls exist. This is an explicit pre-production gate,
+not an inferred plan from a browser request.
 
 ## Deployment
 

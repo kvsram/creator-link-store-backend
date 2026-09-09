@@ -84,6 +84,21 @@ class ProductConfigurationServiceTest {
   }
 
   @Test
+  void publishedLeadMagnetProjectionEnablesCaptureWithoutLeakingDeliveryRedirect() {
+    Map<String, Object> publicRow = Map.of(
+        "id", 120L, "type", "lead-magnet", "title", "Free guide",
+        "configuration_json", "{\"schemaVersion\":1,\"deliveryMode\":\"redirect\","
+            + "\"redirectUrl\":\"https://private.example/lead-guide\","
+            + "\"collectName\":true,\"collectEmail\":true,\"collectPhone\":false,"
+            + "\"consentText\":\"\"}");
+
+    Map<String, Object> result = service.publicProduct(publicRow);
+
+    assertThat(result).containsEntry("lead_capture_enabled", true);
+    assertThat(String.valueOf(result)).doesNotContain("private.example", "redirectUrl");
+  }
+
+  @Test
   void publicWebinarProjectionUsesSanitizedOperationalSessions() {
     Map<String, Object> publicRow = Map.of(
         "id", 13L, "type", "webinar", "title", "Live class",

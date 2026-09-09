@@ -168,7 +168,13 @@ public class ProductConfigurationService {
     long productId = ((Number) row.get("id")).longValue();
     String type = text(row.get("type"));
     Object encoded = response.remove("configuration_json");
-    response.put("public_configuration", safeProjection(productId, type, parseSnapshot(encoded)));
+    Map<String, Object> publicConfiguration = safeProjection(
+        productId, type, parseSnapshot(encoded));
+    response.put("public_configuration", publicConfiguration);
+    if ("lead-magnet".equals(type)) {
+      response.put("lead_capture_enabled",
+          !"unavailable".equals(publicConfiguration.get("configurationState")));
+    }
     return response;
   }
 
