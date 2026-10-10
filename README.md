@@ -37,9 +37,11 @@ There are two deliberately distinct contracts during the identity migration:
 
 Both registration paths atomically create the creator, normalized identity rows, default store,
 notification preferences, and any mandatory session/challenge. A failed insert leaves no partial
-account. Passwords must contain 15–128 Unicode code points. New normalized credentials use
+account. Passwords must contain 12–128 Unicode code points. New normalized credentials use
 Argon2id; existing BCrypt credentials remain valid and are upgraded after a successful login.
-Only password verifiers are stored—never a raw password.
+Only password verifiers are stored—never a raw password. Twelve characters is an explicit
+test-stage usability choice; before password-only production use, add MFA/passkeys and breached-
+password screening or restore the current NIST 15-character single-factor minimum.
 
 The cookie carries a random 30-day opaque token while the database stores only its SHA-256 hash.
 Sessions also have a rolling 12-hour idle expiry and a database `session_version`. The v1 session
@@ -63,10 +65,12 @@ public/webhook/checkout paths a buyer or payment provider needs to hit anonymous
 that the published product, selected plan, meeting slot, and checkout fields all belong to that
 product before contacting a payment provider.
 
-Registration accepts `handle`, `displayName`, `email`, optional `phone`, and `password`. It
-normalizes identity fields, rejects application-route handles such as `login`, `signup`,
-`dashboard`, and `api`, and creates the creator's free store plus notification defaults in one
-transaction. It does **not** accept or persist card numbers, CVVs, bank details, or a client-asserted
+Registration requires `displayName`, `email`, and `password`; `phone` and `handle` are optional.
+When `handle` is omitted, the server creates a readable unique store link from the display name.
+Creators can rename that link later in Settings. Older clients may still provide an explicit
+handle; the API normalizes it and rejects application routes such as `login`, `signup`, `dashboard`,
+and `api`. Registration creates the free store plus notification defaults in one transaction. It
+does **not** accept or persist card numbers, CVVs, bank details, or a client-asserted
 premium entitlement. Premium signup must be implemented as a separate, authenticated
 provider-hosted/tokenized checkout: the provider returns an opaque payment-method/customer ID,
 and only a verified payment webhook may activate the paid subscription. Until that creator-billing

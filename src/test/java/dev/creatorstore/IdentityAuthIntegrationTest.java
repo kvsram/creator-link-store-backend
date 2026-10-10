@@ -72,6 +72,72 @@ class IdentityAuthIntegrationTest {
   @MockitoBean private DemoDataInitializer demoDataInitializer;
 
   @Test
+  void registrationGeneratesAStoreLinkWhenTheClientDoesNotAskForOne() throws Exception {
+    MvcResult first = mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("Alex Creates", "auto-one@example.test",
+                "twelve-chars")))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.handle").value("alex_creates"))
+        .andReturn();
+
+    MvcResult second = mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("Alex Creates", "auto-two@example.test",
+                "twelve-chars")))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.handle").value(
+            org.hamcrest.Matchers.matchesPattern("alex_creates_[a-z0-9]{12}")))
+        .andReturn();
+
+    String firstHandle = body(first).get("handle").asText();
+    String secondHandle = body(second).get("handle").asText();
+    assertThat(secondHandle).isNotEqualTo(firstHandle);
+    assertThat(database.queryForObject("select count(*) from creator_handles where handle in (?,?) "
+        + "and state='active'", Integer.class, firstHandle, secondHandle)).isEqualTo(2);
+  }
+
+  @Test
+  void registrationKeepsExplicitLinksAndUsesSafeFallbacksForAutomaticOnes() throws Exception {
+    mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registration("chosen_link", "chosen@example.test", "twelve-chars")))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.handle").value("chosen_link"));
+
+    mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("Login", "reserved-name@example.test",
+                "twelve-chars")))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.handle").value(
+            org.hamcrest.Matchers.matchesPattern("login_[a-z0-9]{12}")));
+
+    mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("సృష్టికర్త", "unicode-name@example.test",
+                "twelve-chars")))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.handle").value("creator"));
+  }
+
+  @Test
+  void registrationRejectsElevenCharacterPasswordsAndAcceptsTwelve() throws Exception {
+    mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("Short Password", "short@example.test",
+                "eleven-char")))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error").value("Password must contain 12-128 characters."));
+
+    mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("Valid Password", "valid@example.test",
+                "twelve-chars")))
+        .andExpect(status().isAccepted());
+  }
+
+  @Test
   void pendingRegistrationRequiresVerificationThenCreatesAndRevokesADeviceSession()
       throws Exception {
     MvcResult registration = mvc.perform(post("/api/v1/auth/registrations")
@@ -549,6 +615,13 @@ class IdentityAuthIntegrationTest {
         {"handle":"%s","displayName":"Test Creator","email":"%s","phone":null,
          "password":"%s"}
         """.formatted(handle, email, password);
+  }
+
+  private static String registrationWithoutHandle(String displayName, String email,
+                                                   String password) {
+    return """
+        {"displayName":"%s","email":"%s","password":"%s"}
+        """.formatted(displayName, email, password);
   }
 
   private static String login(String identifier, String password) {

@@ -34,6 +34,10 @@ public class RegistrationTransactionService {
     this.sessions = sessions;
   }
 
+  public boolean isHandleClaimed(String handle) {
+    return creators.handleExists(handle);
+  }
+
   @Transactional
   public CreatedAccount create(String handle, String displayName, String email, String phone,
                                String creatorLegacyVerifier, String verifier,

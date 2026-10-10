@@ -31,6 +31,7 @@ public class IdentityAuthenticationService {
   private static final Duration FAILURE_WINDOW = Duration.ofMinutes(15);
   private static final Duration ACCOUNT_LOCK = Duration.ofMinutes(15);
   private static final int ACCOUNT_FAILURE_THRESHOLD = 5;
+  private static final int GENERATED_HANDLE_ATTEMPTS = 5;
   private static final String INVALID_CREDENTIALS = "Invalid handle/email or password.";
 
   private final RegistrationTransactionService registrations;
@@ -82,11 +83,9 @@ public class IdentityAuthenticationService {
     String rawVerificationToken = SessionCookies.newToken();
     OffsetDateTime verificationExpiry = now().plus(VERIFICATION_TTL);
     String status = verificationRequired ? "pending_verification" : "active";
-    RegistrationTransactionService.CreatedAccount created = registrations.create(
-        valid.handle(), valid.displayName(), valid.email(), valid.phone(), creatorLegacyVerifier,
-        verifier, transitionalLegacyVerifier, status, !verificationRequired,
-        SessionCookies.hash(rawVerificationToken), verificationExpiry,
-        !verificationRequired, context);
+    RegistrationTransactionService.CreatedAccount created = createAccount(
+        valid, creatorLegacyVerifier, verifier, transitionalLegacyVerifier, status,
+        verificationRequired, rawVerificationToken, verificationExpiry, context);
 
     Optional<UUID> deliveryId = testDeliveries.deliver("email_verification", valid.email(),
         rawVerificationToken, verificationExpiry);
@@ -274,35 +273,72 @@ public class IdentityAuthenticationService {
 
   private static ValidatedRegistration validate(RegisterRequest request) {
     if (request == null) throw invalidRegistration();
-    String handle = CreatorIdentityPolicy.normalizeHandle(request.handle());
     String displayName = CreatorIdentityPolicy.trim(request.displayName());
     String email = CreatorIdentityPolicy.normalizeEmail(request.email());
     String phone = CreatorIdentityPolicy.nullablePhone(request.phone());
-    if (!CreatorIdentityPolicy.isValidHandle(handle)
-        || displayName.isBlank() || displayName.length() > 80
+    if (displayName.isBlank() || displayName.length() > 80
         || !CreatorIdentityPolicy.isValidEmail(email)
         || !CreatorIdentityPolicy.isValidPhone(phone)) {
       throw invalidRegistration();
     }
     validatePassword(request.password());
-    if (CreatorIdentityPolicy.isReservedHandle(handle)) {
+    String requestedHandle = CreatorIdentityPolicy.normalizeHandle(request.handle());
+    boolean generateHandle = requestedHandle.isBlank();
+    if (!generateHandle && !CreatorIdentityPolicy.isValidHandle(requestedHandle)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-          "That handle is reserved for an application page. Choose another handle.");
+          "Store link must use 3-40 letters, numbers, or underscores.");
     }
-    return new ValidatedRegistration(handle, displayName, email, phone, request.password());
+    if (!generateHandle && CreatorIdentityPolicy.isReservedHandle(requestedHandle)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+          "That store link is reserved for an application page. Choose another one.");
+    }
+    String handle = generateHandle ? CreatorIdentityPolicy.handleBase(displayName) : requestedHandle;
+    return new ValidatedRegistration(handle, displayName, email, phone, request.password(),
+        generateHandle);
   }
 
   public static void validatePassword(String password) {
-    if (password == null || password.codePointCount(0, password.length()) < 15
+    if (password == null || password.isBlank()
+        || password.codePointCount(0, password.length()) < 12
         || password.codePointCount(0, password.length()) > 128) {
-      throw invalidRegistration();
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+          "Password must contain 12-128 characters.");
     }
   }
 
   private static ResponseStatusException invalidRegistration() {
     return new ResponseStatusException(HttpStatus.BAD_REQUEST,
-        "Use a 3-40 character handle, display name, valid email, optional valid phone, "
-            + "and a 15-128 character password.");
+        "Enter a creator or business name, a valid email, and an optional valid phone number.");
+  }
+
+  private RegistrationTransactionService.CreatedAccount createAccount(
+      ValidatedRegistration valid, String creatorLegacyVerifier, String verifier,
+      String transitionalLegacyVerifier, String status, boolean verificationRequired,
+      String rawVerificationToken, OffsetDateTime verificationExpiry, ClientContext context) {
+    String handle = valid.handle();
+    if (valid.generateHandle() && CreatorIdentityPolicy.isReservedHandle(handle)) {
+      handle = randomHandle(handle);
+    }
+    for (int attempt = 0; attempt < GENERATED_HANDLE_ATTEMPTS; attempt++) {
+      try {
+        return registrations.create(handle, valid.displayName(), valid.email(), valid.phone(),
+            creatorLegacyVerifier, verifier, transitionalLegacyVerifier, status,
+            !verificationRequired, SessionCookies.hash(rawVerificationToken), verificationExpiry,
+            !verificationRequired, context);
+      } catch (ResponseStatusException conflict) {
+        boolean generatedHandleCollision = valid.generateHandle()
+            && conflict.getStatusCode().value() == HttpStatus.CONFLICT.value()
+            && registrations.isHandleClaimed(handle);
+        if (!generatedHandleCollision) throw conflict;
+        handle = randomHandle(valid.handle());
+      }
+    }
+    throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+        "We could not prepare a unique store link. Try again.");
+  }
+
+  private static String randomHandle(String base) {
+    return CreatorIdentityPolicy.suffixedHandle(base, UUID.randomUUID().toString());
   }
 
   private static ResponseStatusException unauthorized() {
@@ -321,7 +357,7 @@ public class IdentityAuthenticationService {
   }
 
   private record ValidatedRegistration(String handle, String displayName, String email,
-                                       String phone, String password) {}
+                                       String phone, String password, boolean generateHandle) {}
 
   public record Registration(Map<String, Object> account,
                              SessionService.IssuedSession session) {}
