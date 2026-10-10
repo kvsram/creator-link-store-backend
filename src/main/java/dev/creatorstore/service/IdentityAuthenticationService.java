@@ -2,6 +2,7 @@ package dev.creatorstore.service;
 
 import dev.creatorstore.dto.RegisterRequest;
 import dev.creatorstore.identity.ClientContext;
+import dev.creatorstore.identity.AuthDeliveryService;
 import dev.creatorstore.identity.IdentityRepository;
 import dev.creatorstore.identity.LoginThrottleService;
 import dev.creatorstore.identity.PasswordService;
@@ -9,7 +10,6 @@ import dev.creatorstore.identity.SecurityFingerprintService;
 import dev.creatorstore.identity.SecurityEventService;
 import dev.creatorstore.identity.SessionCookies;
 import dev.creatorstore.identity.SessionService;
-import dev.creatorstore.identity.TestAuthDeliveryService;
 import dev.creatorstore.support.ApiErrorException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -43,7 +43,7 @@ public class IdentityAuthenticationService {
   private final LoginThrottleService throttle;
   private final SecurityFingerprintService fingerprints;
   private final SecurityEventService securityEvents;
-  private final TestAuthDeliveryService testDeliveries;
+  private final AuthDeliveryService deliveries;
 
   public IdentityAuthenticationService(RegistrationTransactionService registrations,
                                        IdentityRepository identities,
@@ -53,7 +53,7 @@ public class IdentityAuthenticationService {
                                        LoginThrottleService throttle,
                                        SecurityFingerprintService fingerprints,
                                        SecurityEventService securityEvents,
-                                       TestAuthDeliveryService testDeliveries) {
+                                       AuthDeliveryService deliveries) {
     this.registrations = registrations;
     this.identities = identities;
     this.challenges = challenges;
@@ -63,12 +63,13 @@ public class IdentityAuthenticationService {
     this.throttle = throttle;
     this.fingerprints = fingerprints;
     this.securityEvents = securityEvents;
-    this.testDeliveries = testDeliveries;
+    this.deliveries = deliveries;
   }
 
   public Registration register(RegisterRequest request, ClientContext context,
                                boolean verificationRequired) {
     ValidatedRegistration valid = validate(request);
+    deliveries.requireAvailable();
     if (!throttle.allowRegistration(context.address())) {
       event(null, "REGISTRATION_RATE_LIMITED", "blocked", context, valid.email());
       throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
@@ -76,10 +77,9 @@ public class IdentityAuthenticationService {
     }
     // Expensive password work deliberately occurs before the transactional database writer.
     String verifier = passwords.encode(valid.password());
-    String realLegacyVerifier = passwords.legacyVerifier(valid.password());
-    String creatorLegacyVerifier = verificationRequired
-        ? passwords.disabledLegacyVerifier() : realLegacyVerifier;
-    String transitionalLegacyVerifier = verificationRequired ? realLegacyVerifier : null;
+    // New accounts never duplicate the real password into the deprecated BCrypt column.
+    String creatorLegacyVerifier = passwords.disabledLegacyVerifier();
+    String transitionalLegacyVerifier = null;
     String rawVerificationToken = SessionCookies.newToken();
     OffsetDateTime verificationExpiry = now().plus(VERIFICATION_TTL);
     String status = verificationRequired ? "pending_verification" : "active";
@@ -87,8 +87,6 @@ public class IdentityAuthenticationService {
         valid, creatorLegacyVerifier, verifier, transitionalLegacyVerifier, status,
         verificationRequired, rawVerificationToken, verificationExpiry, context);
 
-    Optional<UUID> deliveryId = testDeliveries.deliver("email_verification", valid.email(),
-        rawVerificationToken, verificationExpiry);
     event(created.id(), "ACCOUNT_REGISTERED", "success", context, valid.email());
 
     SessionService.IssuedSession session = created.session();
@@ -97,7 +95,8 @@ public class IdentityAuthenticationService {
     account.put("onboarding_next", verificationRequired ? "/verify-email" : "/dashboard/");
     account.put("authenticated", !verificationRequired);
     account.put("verificationRequired", verificationRequired);
-    deliveryId.ifPresent(value -> account.put("testDeliveryId", value));
+    deliveries.exposedTestDelivery(created.deliveryId())
+        .ifPresent(value -> account.put("testDeliveryId", value));
     return new Registration(account, session);
   }
 
@@ -105,9 +104,10 @@ public class IdentityAuthenticationService {
     String identifier = suppliedIdentifier == null ? ""
         : suppliedIdentifier.trim().toLowerCase();
     String password = rawPassword == null ? "" : rawPassword;
-    if (identifier.isBlank() || password.isBlank()) {
+    if (identifier.isBlank() || password.isBlank() || identifier.length() > 320
+        || password.length() > 128) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-          "Handle/email and password are required.");
+          "Handle/email and password must use the supported lengths.");
     }
     if (!throttle.allowLogin(context.address())) {
       event(null, "LOGIN_RATE_LIMITED", "blocked", context, identifier);
@@ -179,6 +179,7 @@ public class IdentityAuthenticationService {
   public Map<String, Object> resendEmailVerification(String suppliedEmail,
                                                      ClientContext context) {
     String email = CreatorIdentityPolicy.normalizeEmail(suppliedEmail);
+    deliveries.requireAvailable();
     if (!throttle.allowChallenge(context.address(), email)) {
       event(null, "EMAIL_VERIFICATION_RATE_LIMITED", "blocked", context, email);
       throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
@@ -186,20 +187,20 @@ public class IdentityAuthenticationService {
     }
     String rawToken = SessionCookies.newToken();
     OffsetDateTime expiry = now().plus(VERIFICATION_TTL);
-    Optional<Long> accountId = challenges.createEmailVerification(email,
-        SessionCookies.hash(rawToken), expiry);
-    accountId.ifPresent(value -> event(value, "EMAIL_VERIFICATION_REQUESTED", "accepted",
+    Optional<IdentityChallengeTransactionService.ChallengeDelivery> delivery =
+        challenges.createEmailVerification(email, rawToken, SessionCookies.hash(rawToken), expiry);
+    delivery.ifPresent(value -> event(value.accountId(), "EMAIL_VERIFICATION_REQUESTED", "accepted",
         context, email));
-    Optional<UUID> deliveryId = testDeliveries.deliver("email_verification", email, rawToken,
-        expiry);
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("accepted", true);
-    deliveryId.ifPresent(value -> response.put("testDeliveryId", value));
+    delivery.flatMap(value -> deliveries.exposedTestDelivery(value.deliveryId()))
+        .ifPresent(value -> response.put("testDeliveryId", value));
     return response;
   }
 
   public Map<String, Object> requestPasswordReset(String suppliedEmail, ClientContext context) {
     String email = CreatorIdentityPolicy.normalizeEmail(suppliedEmail);
+    deliveries.requireAvailable();
     if (!throttle.allowChallenge(context.address(), email)) {
       event(null, "PASSWORD_RESET_RATE_LIMITED", "blocked", context, email);
       throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
@@ -207,14 +208,14 @@ public class IdentityAuthenticationService {
     }
     String rawToken = SessionCookies.newToken();
     OffsetDateTime expiry = now().plus(RESET_TTL);
-    Optional<Long> accountId = challenges.createPasswordReset(email,
-        SessionCookies.hash(rawToken), expiry);
-    accountId.ifPresent(value -> event(value, "PASSWORD_RESET_REQUESTED", "accepted", context,
+    Optional<IdentityChallengeTransactionService.ChallengeDelivery> delivery =
+        challenges.createPasswordReset(email, rawToken, SessionCookies.hash(rawToken), expiry);
+    delivery.ifPresent(value -> event(value.accountId(), "PASSWORD_RESET_REQUESTED", "accepted", context,
         email));
-    Optional<UUID> deliveryId = testDeliveries.deliver("password_reset", email, rawToken, expiry);
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("accepted", true);
-    deliveryId.ifPresent(value -> response.put("testDeliveryId", value));
+    delivery.flatMap(value -> deliveries.exposedTestDelivery(value.deliveryId()))
+        .ifPresent(value -> response.put("testDeliveryId", value));
     return response;
   }
 
@@ -232,7 +233,7 @@ public class IdentityAuthenticationService {
           "Password-reset token is invalid or expired.");
     }
     long accountId = challenges.resetPassword(tokenHash,
-        passwords.encode(newPassword), passwords.legacyVerifier(newPassword));
+        passwords.encode(newPassword), passwords.disabledLegacyVerifier());
     event(accountId, "PASSWORD_CHANGED", "success", context, null);
   }
 
@@ -323,7 +324,7 @@ public class IdentityAuthenticationService {
       try {
         return registrations.create(handle, valid.displayName(), valid.email(), valid.phone(),
             creatorLegacyVerifier, verifier, transitionalLegacyVerifier, status,
-            !verificationRequired, SessionCookies.hash(rawVerificationToken), verificationExpiry,
+            !verificationRequired, rawVerificationToken, SessionCookies.hash(rawVerificationToken), verificationExpiry,
             !verificationRequired, context);
       } catch (ResponseStatusException conflict) {
         boolean generatedHandleCollision = valid.generateHandle()

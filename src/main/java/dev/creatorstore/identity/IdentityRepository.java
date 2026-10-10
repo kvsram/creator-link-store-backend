@@ -193,10 +193,6 @@ public class IdentityRepository {
         + "where account_id=?)", accountId);
     database.update("update account_emails set verified_at=current_timestamp where account_id=? "
         + "and is_primary=true", accountId);
-    database.update("update creators set password_hash=(select legacy_verifier from "
-            + "password_credentials where account_id=?) where id=? and exists "
-            + "(select 1 from password_credentials where account_id=? and legacy_verifier "
-            + "is not null)", accountId, accountId, accountId);
     database.update("update password_credentials set legacy_verifier=null where account_id=?",
         accountId);
     database.update("update accounts set status='active',updated_at=current_timestamp,"

@@ -29,7 +29,9 @@ import org.springframework.test.web.servlet.MockMvc;
     "spring.datasource.password=",
     "spring.datasource.driver-class-name=org.h2.Driver",
     "spring.sql.init.mode=never",
-    "instagram.autodm-worker-enabled=false"
+    "instagram.autodm-worker-enabled=false",
+    "app.auth.test-delivery-enabled=true",
+    "app.auth.test-delivery-key=registration-atomicity-secret"
 })
 @AutoConfigureMockMvc
 @Sql("/auth-integration-schema.sql")

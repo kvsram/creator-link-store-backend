@@ -4,10 +4,9 @@ import jakarta.servlet.http.HttpServletRequest;
 
 public record ClientContext(String address, String userAgent, String requestId) {
   public static ClientContext from(HttpServletRequest request) {
-    String forwarded = request.getHeader("X-Forwarded-For");
-    String address = forwarded == null || forwarded.isBlank()
-        ? request.getRemoteAddr() : forwarded.split(",", 2)[0].trim();
-    return new ClientContext(address, request.getHeader("User-Agent"),
+    // Spring's configured forwarded-header strategy resolves trusted proxy metadata before this
+    // point. Never parse a client-supplied X-Forwarded-For value here.
+    return new ClientContext(request.getRemoteAddr(), request.getHeader("User-Agent"),
         safeRequestId(request.getHeader("X-Request-Id")));
   }
 

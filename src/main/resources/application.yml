@@ -1,11 +1,25 @@
 server:
   port: ${PORT:8080}
-  forward-headers-strategy: framework
+  # Trust forwarded client/protocol headers only when the TCP peer is an internal reverse proxy.
+  # The public load balancer/ingress must overwrite (not append user-controlled) forwarding headers.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      remote-ip-header: X-Forwarded-For
+      protocol-header: X-Forwarded-Proto
+      internal-proxies: ${APP_TRUSTED_PROXY_REGEX:10\..*|192\.168\..*|169\.254\..*|127\..*|172\.(1[6-9]|2[0-9]|3[0-1])\..*|0:0:0:0:0:0:0:1|::1}
 app:
+  environment: ${APP_ENVIRONMENT:local}
   allowed-origins: ${APP_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
   storage-dir: ${APP_STORAGE_DIR:./data/uploads}
   secure-cookies: ${APP_SECURE_COOKIES:false}
   auth:
+    public-base-url: ${APP_AUTH_PUBLIC_BASE_URL:http://localhost:5173}
+    email-mode: ${APP_AUTH_EMAIL_MODE:disabled}
+    email-from: ${APP_AUTH_EMAIL_FROM:}
+    email-from-name: ${APP_AUTH_EMAIL_FROM_NAME:Creator Store}
+    delivery-worker-enabled: ${APP_AUTH_DELIVERY_WORKER_ENABLED:true}
+    delivery-poll-ms: ${APP_AUTH_DELIVERY_POLL_MS:1000}
     # Test mailbox is intentionally inert unless both values are explicitly supplied.
     test-delivery-enabled: ${APP_AUTH_TEST_DELIVERY_ENABLED:false}
     test-delivery-key: ${APP_AUTH_TEST_DELIVERY_KEY:}
@@ -17,6 +31,8 @@ app:
     challenge-ip-attempts: ${APP_AUTH_CHALLENGE_IP_ATTEMPTS:20}
     challenge-identifier-attempts: ${APP_AUTH_CHALLENGE_IDENTIFIER_ATTEMPTS:5}
     challenge-window: ${APP_AUTH_CHALLENGE_WINDOW:PT15M}
+  security:
+    csrf-enabled: ${APP_SECURITY_CSRF_ENABLED:true}
 spring:
   servlet:
     multipart:
@@ -28,7 +44,27 @@ spring:
     password: ${DB_PASSWORD:creator}
   sql:
     init:
-      mode: always
+      mode: never
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: 1
+    validate-migration-naming: true
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SMTP_AUTH:false}
+          connectiontimeout: ${SMTP_CONNECTION_TIMEOUT_MS:10000}
+          timeout: ${SMTP_READ_TIMEOUT_MS:10000}
+          writetimeout: ${SMTP_WRITE_TIMEOUT_MS:10000}
+          starttls:
+            enable: ${SMTP_STARTTLS_ENABLED:false}
+            required: ${SMTP_STARTTLS_REQUIRED:false}
   jdbc:
     template:
       query-timeout: 5

@@ -4,6 +4,7 @@ import dev.creatorstore.dto.RegisterRequest;
 import dev.creatorstore.identity.ClientContext;
 import dev.creatorstore.service.AuthenticationService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,7 +33,7 @@ public class AuthenticationController {
   }
 
   @PostMapping("/api/auth/register")
-  public ResponseEntity<Map<String, Object>> register(@RequestBody RegisterRequest request,
+  public ResponseEntity<Map<String, Object>> register(@Valid @RequestBody RegisterRequest request,
       HttpServletRequest httpRequest) {
     AuthenticationService.Registration registration = authentication.register(request,
         ClientContext.from(httpRequest));

@@ -1,0 +1,20 @@
+spring:
+  flyway:
+    enabled: false
+  mail:
+    # Creates the JavaMailSender bean without contacting SMTP; email-mode=test
+    # keeps the delivery worker from invoking it in the legacy integration suite.
+    host: localhost
+app:
+  security:
+    csrf-enabled: false
+  auth:
+    email-mode: test
+
+# A test resource named application.yml replaces the main resource on the test
+# classpath. Keep the two constructor-required payment URLs available so full
+# application-context integration tests can start without relying on developer
+# environment variables.
+payments:
+  success-url: http://localhost:3000/test-store?checkout=success
+  cancel-url: http://localhost:3000/test-store?checkout=cancelled

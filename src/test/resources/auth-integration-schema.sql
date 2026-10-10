@@ -1,4 +1,5 @@
 drop table if exists tags;
+drop table if exists auth_delivery_outbox;
 drop table if exists auth_security_events;
 drop table if exists password_reset_tokens;
 drop table if exists email_verification_tokens;
@@ -208,4 +209,22 @@ create table auth_security_events (
   user_agent_hash varchar(64),
   metadata_json varchar(2000) not null default '{}',
   occurred_at timestamp with time zone not null default current_timestamp
+);
+create table auth_delivery_outbox (
+  delivery_id uuid primary key,
+  account_id bigint,
+  delivery_type varchar(32) not null,
+  recipient varchar(320) not null,
+  token_value text not null,
+  expires_at timestamp with time zone not null,
+  state varchar(16) not null default 'pending',
+  attempts integer not null default 0,
+  next_attempt_at timestamp with time zone not null default current_timestamp,
+  lease_until timestamp with time zone,
+  lease_token uuid,
+  last_error varchar(500),
+  created_at timestamp with time zone not null default current_timestamp,
+  sent_at timestamp with time zone,
+  check ((state='leased' and lease_until is not null and lease_token is not null)
+      or (state<>'leased' and lease_until is null and lease_token is null))
 );

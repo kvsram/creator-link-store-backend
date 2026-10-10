@@ -16,7 +16,10 @@ docker compose up -d db
 DB_USER=creator DB_PASSWORD=creator mvn spring-boot:run
 ```
 
-It listens on port 8080 and its inferred PostgreSQL schema is initialized from `src/main/resources/schema.sql`. A clean database seeds the deterministic `alex` demo (its password is a random, intentionally-unusable value — register a real account, verify its email, and then log in to get a usable session).
+It listens on port 8080. Flyway owns the PostgreSQL schema through
+`src/main/resources/db/migration`; application startup SQL is disabled. A clean database seeds the
+deterministic `alex` demo (its password is a random, intentionally-unusable value — register a real
+account, verify its email, and then log in to get a usable session).
 
 India launch defaults are `INR`, Razorpay as the preferred strategy, and both payments and Instagram disabled. `GET /api/v1/payments/config` and `GET /api/v1/integrations/instagram/config` report safe readiness without secrets. Provider modes are `disabled`, `test`, and `live`; use test credentials locally and store deployed secrets in the selected cloud secret manager. Checkout amounts are always loaded server-side and expressed as integer paise in `*_subunits` fields.
 
@@ -58,12 +61,14 @@ endpoints are:
   updates both transition-era password columns, bumps `session_version`, and revokes every legacy
   and v1 session.
 
-Every `/api/v1/**` route requires a valid session except the
-public/webhook/checkout paths a buyer or payment provider needs to hit anonymously — see
-`identity/AuthInterceptor.java` for the exact allowlist. Authenticated creator APIs resolve
-`creatorId` only from the session. Public checkout accepts the storefront creator ID but verifies
-that the published product, selected plan, meeting slot, and checkout fields all belong to that
-product before contacting a payment provider.
+Every `/api/v1/**` route requires a valid session except the explicitly reviewed
+public/webhook/checkout paths a buyer or provider needs to hit anonymously. Spring Security owns
+that allowlist in `identity/SecurityConfiguration.java`; it resolves the opaque session into a
+`CreatorPrincipal` with `ROLE_CREATOR`. Authenticated creator APIs resolve `creatorId` only from the
+server-side session. Public checkout accepts the storefront creator ID but verifies that the
+published product, selected plan, meeting slot, and checkout fields all belong to that product
+before contacting a payment provider. Cookie-authenticated mutations also require the CSRF cookie
+and matching `X-XSRF-TOKEN` header.
 
 Registration requires `displayName`, `email`, and `password`; `phone` and `handle` are optional.
 When `handle` is omitted, the server creates a readable unique store link from the display name.
@@ -78,18 +83,31 @@ model exists, the registration response honestly reports `plan: "free"`.
 
 ### Verification delivery and authentication configuration
 
-There is no real email provider in this test release. Verification and reset tokens are never
-returned by normal production endpoints. For automated development testing only, an in-memory test
-mailbox can be enabled with both `APP_AUTH_TEST_DELIVERY_ENABLED=true` and a strong
-`APP_AUTH_TEST_DELIVERY_KEY`. The response then includes a one-time `testDeliveryId`; an authorized
-test operator may retrieve it from `GET /api/v1/auth/test-deliveries/{deliveryId}` using the
-`X-Test-Auth-Key` header. This feature is disabled by default, stores nothing durably, must remain
-disabled in production, and the key must not be committed or exposed to browser users.
+Registration and password recovery write their challenge and an email-delivery outbox row in the
+same database transaction. A scheduled worker leases due rows, sends them through provider-neutral
+SMTP, retries temporary failures with bounded exponential backoff, and clears the raw delivery token
+after send, expiry, terminal failure, replacement by a newer challenge, or successful consumption.
+Every worker claim has a unique lease token, so a worker whose lease expired cannot overwrite the
+new owner's result. Local Docker uses Mailpit. AWS can use the same adapter with SES SMTP
+credentials. Verification and reset tokens are never returned by ordinary production endpoints.
+
+For deterministic automated tests only, set `APP_AUTH_EMAIL_MODE=test`, enable the gated test
+delivery endpoint, and provide a strong `APP_AUTH_TEST_DELIVERY_KEY`. A successful request then
+includes `testDeliveryId`; an authorized test process may retrieve the durable outbox item from
+`GET /api/v1/auth/test-deliveries/{deliveryId}` with `X-Test-Auth-Key`. Production startup refuses to
+run when this endpoint is enabled.
 
 Relevant environment settings are:
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
+| `APP_ENVIRONMENT` | `local` | Set to `production` to activate fail-closed security configuration checks. |
+| `APP_AUTH_EMAIL_MODE` | `disabled` | `disabled`, `test`, or `smtp`; registration/recovery return `503` when delivery is not configured. An SMTP outage after enqueue is handled by the retrying outbox worker and monitoring. |
+| `APP_AUTH_PUBLIC_BASE_URL` | `http://localhost:5173` | Frontend origin used to create verification and reset links. |
+| `APP_AUTH_EMAIL_FROM` | empty | Required SMTP sender address. |
+| `SMTP_HOST` / `SMTP_PORT` | `localhost` / `1025` | Mailpit, SES SMTP, or another provider-neutral SMTP endpoint. |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | empty | Required authenticated SMTP credentials in production. |
+| `SMTP_CONNECTION_TIMEOUT_MS` / `SMTP_READ_TIMEOUT_MS` / `SMTP_WRITE_TIMEOUT_MS` | `10000` each | Bounded provider calls; production rejects non-positive values or values as long as the two-minute delivery lease. |
 | `APP_AUTH_TEST_DELIVERY_ENABLED` | `false` | Enables the development-only mailbox. |
 | `APP_AUTH_TEST_DELIVERY_KEY` | empty | Operator key required to read a test delivery. |
 | `APP_AUTH_FINGERPRINT_SECRET` | empty | HMAC secret for non-plaintext security fingerprints; set outside local development. |
@@ -102,9 +120,10 @@ Relevant environment settings are:
 These bounded in-memory guards are suitable only for the current single-instance test deployment;
 move the counters to Redis or an edge rate-limiter before scaling to multiple application replicas.
 
-The schema migration is additive: legacy `creators` and `sessions` remain the compatibility
+The versioned Flyway migrations are additive: legacy `creators` and `sessions` remain the compatibility
 surface while normalized accounts, profiles, handles, credentials, challenges, audit events, and
-sessions are backfilled. Existing active users are grandfathered with a verified primary email.
+sessions are backfilled. V3 adds explicit ownership to outbox leases and safely returns any lease
+held by a pre-V3 worker to pending during deployment. Existing active users are grandfathered with a verified primary email.
 Pending accounts keep an unusable random BCrypt value in the legacy creator row until verification,
 preventing an old-image rollback from bypassing verification. Logout/reset revoke legacy and v1
 sessions, and the new resolver honors a legacy revocation. Deploy this version with a Recreate
@@ -115,6 +134,10 @@ supported, and rolling back to the old image intentionally logs out sessions cre
 `handle_taken`, the compatibility alias `username_taken`, and `available`; it deliberately ignores
 email and never discloses whether an email address is registered. Duplicate registration still
 returns one generic handle-or-email conflict, and the public edge should rate-limit both endpoints.
+
+The complete controller/service/repository request flow, relational model, threat boundary,
+environment matrix, and end-to-end release gates are documented in
+[`docs/AUTHENTICATION_ARCHITECTURE.md`](docs/AUTHENTICATION_ARCHITECTURE.md).
 
 ## Product types
 
