@@ -1,6 +1,6 @@
 name: Build and publish backend artifact
 on:
-  push: { branches: [main] }
+  push: { branches: [main, test] }
   workflow_dispatch:
 permissions: { contents: read, packages: write, attestations: write, id-token: write }
 jobs:
