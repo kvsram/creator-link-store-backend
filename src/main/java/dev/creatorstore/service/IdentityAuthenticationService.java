@@ -36,6 +36,7 @@ public class IdentityAuthenticationService {
   private final RegistrationTransactionService registrations;
   private final IdentityRepository identities;
   private final IdentityChallengeTransactionService challenges;
+  private final IdentityLoginTransactionService loginTransactions;
   private final PasswordService passwords;
   private final SessionService sessions;
   private final LoginThrottleService throttle;
@@ -46,6 +47,7 @@ public class IdentityAuthenticationService {
   public IdentityAuthenticationService(RegistrationTransactionService registrations,
                                        IdentityRepository identities,
                                        IdentityChallengeTransactionService challenges,
+                                       IdentityLoginTransactionService loginTransactions,
                                        PasswordService passwords, SessionService sessions,
                                        LoginThrottleService throttle,
                                        SecurityFingerprintService fingerprints,
@@ -54,6 +56,7 @@ public class IdentityAuthenticationService {
     this.registrations = registrations;
     this.identities = identities;
     this.challenges = challenges;
+    this.loginTransactions = loginTransactions;
     this.passwords = passwords;
     this.sessions = sessions;
     this.throttle = throttle;
@@ -143,13 +146,22 @@ public class IdentityAuthenticationService {
           Map.of("emailHint", maskEmail(account.email())));
     }
 
-    identities.clearFailures(account.id());
-    if (passwords.needsUpgrade(account.verifier())) {
-      identities.upgradeVerifier(account.id(), passwords.encode(password));
+    String upgradeCandidate = passwords.needsUpgrade(account.verifier())
+        ? passwords.encode(password) : null;
+    IdentityLoginTransactionService.Result finalized = loginTransactions.finalizeLogin(
+        account.id(), account.verifier(), password, upgradeCandidate, context);
+    if (finalized.outcome() == IdentityLoginTransactionService.Outcome.INVALID) {
+      event(account.id(), "LOGIN_FAILED", "invalid_credentials", context, identifier);
+      throw unauthorized();
     }
-    SessionService.IssuedSession session = sessions.issue(account.id(), context, "password");
+    if (finalized.outcome() == IdentityLoginTransactionService.Outcome.EMAIL_NOT_VERIFIED) {
+      event(account.id(), "LOGIN_FAILED", "email_not_verified", context, identifier);
+      throw new ApiErrorException(HttpStatus.FORBIDDEN,
+          "Verify your email before signing in.", "EMAIL_NOT_VERIFIED",
+          Map.of("emailHint", maskEmail(account.email())));
+    }
     event(account.id(), "LOGIN_SUCCEEDED", "success", context, identifier);
-    return new LoginResult(accountResponse(account.id()), session);
+    return new LoginResult(accountResponse(account.id()), finalized.session());
   }
 
   public LoginResult verifyEmail(String rawToken, ClientContext context) {

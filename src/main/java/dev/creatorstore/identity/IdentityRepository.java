@@ -78,6 +78,27 @@ public class IdentityRepository {
     return rows.stream().findFirst();
   }
 
+  public Optional<LoginAccount> findForLoginByAccountIdForUpdate(long accountId) {
+    lockAccount(accountId);
+    List<LoginAccount> rows = database.query("select a.id,a.public_id,a.status,a.session_version,"
+            + "h.handle,p.display_name,p.bio,p.avatar_url,e.email_normalized,ph.phone_original,"
+            + "pc.verifier,ls.locked_until "
+            + "from accounts a join creator_profiles p on p.account_id=a.id "
+            + "join creator_handles h on h.account_id=a.id and h.state='active' "
+            + "join account_emails e on e.account_id=a.id and e.is_primary=true "
+            + "left join account_phones ph on ph.account_id=a.id and ph.is_primary=true "
+            + "join password_credentials pc on pc.account_id=a.id "
+            + "join account_login_state ls on ls.account_id=a.id where a.id=?",
+        (rs, row) -> new LoginAccount(rs.getLong("id"),
+            UUID.fromString(rs.getString("public_id")), rs.getString("status"),
+            rs.getInt("session_version"), rs.getString("handle"),
+            rs.getString("display_name"), rs.getString("bio"), rs.getString("avatar_url"),
+            rs.getString("email_normalized"), rs.getString("phone_original"),
+            rs.getString("verifier"), rs.getObject("locked_until", OffsetDateTime.class)),
+        accountId);
+    return rows.stream().findFirst();
+  }
+
   public Optional<AccountView> findAccount(long accountId) {
     List<AccountView> rows = database.query("select a.id,a.public_id,a.status,h.handle,"
             + "p.display_name,p.bio,coalesce(p.avatar_url,c.avatar_url) as avatar_url,"

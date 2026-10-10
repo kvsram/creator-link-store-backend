@@ -33,7 +33,7 @@ class CreatorControllerTest {
   @Test
   void registrationRejectsUnsafeInputBeforeDatabaseAccess() {
     IdentityAuthenticationService service = new IdentityAuthenticationService(
-        null, null, null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, null, null, null);
     assertThatThrownBy(() -> service.register(
         new RegisterRequest("x", "Name", "bad-email", null, "short"),
         ClientContext.unknown(), false))
@@ -44,7 +44,7 @@ class CreatorControllerTest {
   @Test
   void registrationRejectsReservedRouteHandleBeforeDatabaseAccess() {
     IdentityAuthenticationService service = new IdentityAuthenticationService(
-        null, null, null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, null, null, null);
 
     assertThatThrownBy(() -> service.register(
         new RegisterRequest("SignUp", "Creator Name", "creator@example.com", null,

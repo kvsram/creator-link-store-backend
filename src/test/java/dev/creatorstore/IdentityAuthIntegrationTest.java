@@ -12,9 +12,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.creatorstore.bootstrap.DemoDataInitializer;
+import dev.creatorstore.identity.ClientContext;
 import dev.creatorstore.identity.IdentityRepository;
+import dev.creatorstore.identity.PasswordService;
 import dev.creatorstore.identity.SessionCookies;
 import dev.creatorstore.service.IdentityChallengeTransactionService;
+import dev.creatorstore.service.IdentityLoginTransactionService;
 import jakarta.servlet.http.Cookie;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -62,6 +65,8 @@ class IdentityAuthIntegrationTest {
   @Autowired private JdbcTemplate database;
   @Autowired private IdentityRepository identities;
   @Autowired private IdentityChallengeTransactionService challenges;
+  @Autowired private IdentityLoginTransactionService loginTransactions;
+  @Autowired private PasswordService passwordService;
   @Autowired private BCryptPasswordEncoder bcrypt;
 
   @MockitoBean private DemoDataInitializer demoDataInitializer;
@@ -473,6 +478,42 @@ class IdentityAuthIntegrationTest {
 
     assertThat(database.queryForObject("select count(*) from password_reset_tokens "
         + "where account_id=? and consumed_at is null", Integer.class, accountId)).isEqualTo(1);
+  }
+
+  @Test
+  void resetAfterInitialPasswordCheckPreventsOldCredentialFromFinalizingALogin() {
+    String legacy = bcrypt.encode(PASSWORD);
+    database.update("insert into creators(handle,display_name,email,password_hash,bio) "
+        + "values(?,?,?,?,?)", "login_reset_race", "Login Reset Race",
+        "login-reset-race@example.test", legacy, "");
+    long accountId = database.queryForObject("select id from creators where handle=?",
+        Long.class, "login_reset_race");
+    identities.provisionExisting(accountId, "login_reset_race", "Login Reset Race",
+        "login-reset-race@example.test", null, legacy);
+
+    IdentityRepository.LoginAccount initiallyRead = identities.findForLogin(
+        "login-reset-race@example.test").orElseThrow();
+    assertThat(passwordService.matches(PASSWORD, initiallyRead.verifier())).isTrue();
+    String staleUpgradeCandidate = passwordService.encode(PASSWORD);
+
+    String resetHash = SessionCookies.hash("deterministic-reset-between-login-phases");
+    challenges.createPasswordReset("login-reset-race@example.test", resetHash,
+        OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(30));
+    challenges.resetPassword(resetHash, passwordService.encode(NEW_PASSWORD),
+        passwordService.legacyVerifier(NEW_PASSWORD));
+
+    IdentityLoginTransactionService.Result finalized = loginTransactions.finalizeLogin(
+        accountId, initiallyRead.verifier(), PASSWORD, staleUpgradeCandidate,
+        ClientContext.unknown());
+
+    assertThat(finalized.outcome()).isEqualTo(IdentityLoginTransactionService.Outcome.INVALID);
+    assertThat(finalized.session()).isNull();
+    assertThat(database.queryForObject("select count(*) from auth_sessions where account_id=?",
+        Integer.class, accountId)).isZero();
+    String currentVerifier = database.queryForObject("select verifier from password_credentials "
+        + "where account_id=?", String.class, accountId);
+    assertThat(passwordService.matches(NEW_PASSWORD, currentVerifier)).isTrue();
+    assertThat(passwordService.matches(PASSWORD, currentVerifier)).isFalse();
   }
 
   private Cookie registerAndVerify(String handle, String email, String password) throws Exception {
