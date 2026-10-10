@@ -1,6 +1,7 @@
 package dev.creatorstore.service;
 
 import dev.creatorstore.identity.IdentityRepository;
+import dev.creatorstore.identity.AuthDeliveryService;
 import dev.creatorstore.identity.ClientContext;
 import dev.creatorstore.identity.SessionService;
 import dev.creatorstore.repository.CreatorRepository;
@@ -22,16 +23,23 @@ public class RegistrationTransactionService {
   private final FeatureRepository features;
   private final IdentityRepository identities;
   private final SessionService sessions;
+  private final AuthDeliveryService deliveries;
 
   public RegistrationTransactionService(CreatorRepository creators, StoreRepository stores,
                                         FeatureRepository features,
                                         IdentityRepository identities,
-                                        SessionService sessions) {
+                                        SessionService sessions,
+                                        AuthDeliveryService deliveries) {
     this.creators = creators;
     this.stores = stores;
     this.features = features;
     this.identities = identities;
     this.sessions = sessions;
+    this.deliveries = deliveries;
+  }
+
+  public boolean isHandleClaimed(String handle) {
+    return creators.handleExists(handle);
   }
 
   @Transactional
@@ -39,6 +47,7 @@ public class RegistrationTransactionService {
                                String creatorLegacyVerifier, String verifier,
                                String transitionalLegacyVerifier, String accountStatus,
                                boolean emailVerified,
+                               String rawVerificationToken,
                                String verificationTokenHash,
                                OffsetDateTime verificationExpiresAt,
                                boolean issueSession, ClientContext context) {
@@ -51,13 +60,16 @@ public class RegistrationTransactionService {
       features.createNotificationDefaults(accountId);
       identities.createEmailVerificationToken(identities.primaryEmailId(accountId),
           verificationTokenHash, verificationExpiresAt);
+      UUID deliveryId = deliveries.enqueue(accountId, "email_verification", email,
+          rawVerificationToken, verificationExpiresAt);
       SessionService.IssuedSession session = issueSession
           ? sessions.issue(accountId, context, "password") : null;
-      return new CreatedAccount(accountId, publicId, session);
+      return new CreatedAccount(accountId, publicId, session, deliveryId);
     } catch (DataIntegrityViolationException conflict) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "Handle or email already exists.");
     }
   }
 
-  public record CreatedAccount(long id, UUID publicId, SessionService.IssuedSession session) {}
+  public record CreatedAccount(long id, UUID publicId, SessionService.IssuedSession session,
+                               UUID deliveryId) {}
 }

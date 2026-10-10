@@ -1,7 +1,6 @@
 package dev.creatorstore.service;
 
 import dev.creatorstore.repository.TagRepository;
-import dev.creatorstore.support.Values;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -15,9 +14,8 @@ public class TagService {
     this.tags = tags;
   }
 
-  public Map<String, Object> upsert(Map<String, Object> body) {
-    long creatorId = Values.longValue(body.getOrDefault("creator_id", 1));
-    String name = Values.text(body.get("name")).trim();
+  public Map<String, Object> upsert(long creatorId, Map<String, Object> body) {
+    String name = body.get("name") == null ? "" : String.valueOf(body.get("name")).trim();
     if (name.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "name is required");
     return tags.upsert(creatorId, name);
   }

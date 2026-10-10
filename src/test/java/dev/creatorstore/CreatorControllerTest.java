@@ -13,11 +13,9 @@ import static org.mockito.Mockito.when;
 import dev.creatorstore.controller.HealthController;
 import dev.creatorstore.dto.RegisterRequest;
 import dev.creatorstore.identity.ClientContext;
-import dev.creatorstore.identity.SessionService;
 import dev.creatorstore.repository.CreatorRepository;
 import dev.creatorstore.service.AuthenticationService;
 import dev.creatorstore.service.IdentityAuthenticationService;
-import java.time.OffsetDateTime;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -88,18 +86,16 @@ class CreatorControllerTest {
   }
 
   @Test
-  void registrationNormalizesPersonalDetailsAndCreatesFreeStore() {
+  void compatibilityRegistrationUsesTheVerificationFirstFlow() {
     CreatorRepository creators = mock(CreatorRepository.class);
     IdentityAuthenticationService identity = mock(IdentityAuthenticationService.class);
-    SessionService.IssuedSession issued = new SessionService.IssuedSession(
-        "browser-token", OffsetDateTime.parse("2030-01-01T00:00:00Z"));
     RegisterRequest request = new RegisterRequest(" Creator_Name ", " Creator Name ",
         " Creator@Example.com ", " ", "safe-password-long");
     Map<String, Object> expected = Map.of("id", 42L, "handle", "creator_name",
-        "displayName", "Creator Name", "plan", "free", "authenticated", true,
-        "onboarding_next", "/dashboard/");
-    when(identity.register(eq(request), any(ClientContext.class), eq(false)))
-        .thenReturn(new IdentityAuthenticationService.Registration(expected, issued));
+        "displayName", "Creator Name", "plan", "free", "authenticated", false,
+        "verificationRequired", true, "onboarding_next", "/verify-email");
+    when(identity.register(eq(request), any(ClientContext.class), eq(true)))
+        .thenReturn(new IdentityAuthenticationService.Registration(expected, null));
     AuthenticationService service = new AuthenticationService(creators, identity);
 
     AuthenticationService.Registration registration = service.register(request);
@@ -109,9 +105,10 @@ class CreatorControllerTest {
         .containsEntry("handle", "creator_name")
         .containsEntry("displayName", "Creator Name")
         .containsEntry("plan", "free")
-        .containsEntry("authenticated", true)
-        .containsEntry("onboarding_next", "/dashboard/");
-    assertThat(registration.session()).isEqualTo(issued);
-    verify(identity).register(eq(request), any(ClientContext.class), eq(false));
+        .containsEntry("authenticated", false)
+        .containsEntry("verificationRequired", true)
+        .containsEntry("onboarding_next", "/verify-email");
+    assertThat(registration.session()).isNull();
+    verify(identity).register(eq(request), any(ClientContext.class), eq(true));
   }
 }

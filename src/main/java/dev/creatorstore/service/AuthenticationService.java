@@ -35,7 +35,7 @@ public class AuthenticationService {
 
   public Registration register(RegisterRequest request, ClientContext context) {
     IdentityAuthenticationService.Registration result =
-        identityAuthentication.register(request, context, false);
+        identityAuthentication.register(request, context, true);
     return new Registration(result.account(), result.session());
   }
 

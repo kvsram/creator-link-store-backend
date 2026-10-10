@@ -1,7 +1,7 @@
 package dev.creatorstore.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import dev.creatorstore.dto.InstagramAutomationRuleRequest;
 import dev.creatorstore.repository.InstagramAutomationRepository;
 import java.time.Instant;

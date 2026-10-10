@@ -2,3 +2,11 @@ target/
 .idea/
 *.iml
 data/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks

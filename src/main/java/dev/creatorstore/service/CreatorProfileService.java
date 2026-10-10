@@ -12,10 +12,10 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class CreatorProfileService {
   public static final String INVALID_HANDLE =
-      "Handle must use 3-40 letters, numbers, or underscores.";
+      "Store link must use 3-40 letters, numbers, or underscores.";
   public static final String RESERVED_HANDLE =
-      "That handle is reserved for an application page. Choose another handle.";
-  public static final String HANDLE_CONFLICT = "Handle already exists.";
+      "That store link is reserved for an application page. Choose another one.";
+  public static final String HANDLE_CONFLICT = "Store link already exists.";
   public static final String INVALID_PROFILE =
       "Display name is required and must be at most 80 characters; bio must be at most "
           + "280 characters; phone must be blank or a valid 7-32 character number.";
@@ -24,6 +24,14 @@ public class CreatorProfileService {
 
   public CreatorProfileService(CreatorRepository creators) {
     this.creators = creators;
+  }
+
+  public Map<String, Object> get(long creatorId) {
+    Map<String, Object> profile = creators.findProfile(creatorId);
+    if (profile.isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Creator profile not found.");
+    }
+    return profile;
   }
 
   @Transactional

@@ -2,11 +2,16 @@ package dev.creatorstore.controller;
 
 import dev.creatorstore.dto.RegisterRequest;
 import dev.creatorstore.identity.ClientContext;
+import dev.creatorstore.identity.CreatorPrincipal;
 import dev.creatorstore.identity.SessionCookies;
 import dev.creatorstore.identity.SessionService;
 import dev.creatorstore.identity.TestAuthDeliveryService;
 import dev.creatorstore.service.IdentityAuthenticationService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpHeaders;
@@ -20,6 +25,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -37,14 +44,14 @@ public class IdentityAuthController {
   }
 
   @PostMapping("/registrations")
-  ResponseEntity<Map<String, Object>> register(@RequestBody RegisterRequest body,
+  ResponseEntity<Map<String, Object>> register(@Valid @RequestBody RegisterRequest body,
                                                 HttpServletRequest request) {
     var registration = authentication.register(body, ClientContext.from(request), true);
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(registration.account());
   }
 
   @PostMapping("/email-verifications")
-  ResponseEntity<Map<String, Object>> verifyEmail(@RequestBody TokenRequest body,
+  ResponseEntity<Map<String, Object>> verifyEmail(@Valid @RequestBody TokenRequest body,
                                                    HttpServletRequest request) {
     var result = authentication.verifyEmail(body.token(), ClientContext.from(request));
     return ResponseEntity.ok()
@@ -53,14 +60,14 @@ public class IdentityAuthController {
   }
 
   @PostMapping("/email-verifications/resend")
-  ResponseEntity<Map<String, Object>> resendVerification(@RequestBody EmailRequest body,
+  ResponseEntity<Map<String, Object>> resendVerification(@Valid @RequestBody EmailRequest body,
                                                           HttpServletRequest request) {
     return ResponseEntity.accepted().body(authentication.resendEmailVerification(body.email(),
         ClientContext.from(request)));
   }
 
   @PostMapping("/sessions")
-  ResponseEntity<Map<String, Object>> login(@RequestBody LoginRequest body,
+  ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginRequest body,
                                              HttpServletRequest request) {
     var result = authentication.login(body.handleOrEmail(), body.password(),
         ClientContext.from(request));
@@ -70,9 +77,21 @@ public class IdentityAuthController {
   }
 
   @GetMapping("/sessions")
-  Map<String, Object> sessions(HttpServletRequest request) {
-    long accountId = authenticatedAccountId(request);
-    return Map.of("sessions", sessions.list(accountId, SessionCookies.readToken(request)));
+  Map<String, Object> sessions(@AuthenticationPrincipal CreatorPrincipal principal,
+                               HttpServletRequest request) {
+    return Map.of("sessions", sessions.list(principal.accountId(),
+        SessionCookies.readToken(request)));
+  }
+
+  @GetMapping("/me")
+  Map<String, Object> me(@AuthenticationPrincipal CreatorPrincipal principal) {
+    return authentication.accountResponse(principal.accountId());
+  }
+
+  @GetMapping("/csrf")
+  Map<String, Object> csrf(CsrfToken token) {
+    return Map.of("headerName", token.getHeaderName(), "parameterName", token.getParameterName(),
+        "token", token.getToken());
   }
 
   @DeleteMapping("/sessions/current")
@@ -84,20 +103,21 @@ public class IdentityAuthController {
   }
 
   @DeleteMapping("/sessions/{publicId}")
-  Map<String, Object> revoke(@PathVariable UUID publicId, HttpServletRequest request) {
-    sessions.revoke(authenticatedAccountId(request), publicId);
+  Map<String, Object> revoke(@PathVariable UUID publicId,
+                             @AuthenticationPrincipal CreatorPrincipal principal) {
+    sessions.revoke(principal.accountId(), publicId);
     return Map.of("ok", true);
   }
 
   @PostMapping("/password-reset-requests")
-  ResponseEntity<Map<String, Object>> requestPasswordReset(@RequestBody EmailRequest body,
+  ResponseEntity<Map<String, Object>> requestPasswordReset(@Valid @RequestBody EmailRequest body,
                                                             HttpServletRequest request) {
     return ResponseEntity.accepted().body(authentication.requestPasswordReset(body.email(),
         ClientContext.from(request)));
   }
 
   @PostMapping("/password-resets")
-  ResponseEntity<Map<String, Object>> resetPassword(@RequestBody PasswordResetRequest body,
+  ResponseEntity<Map<String, Object>> resetPassword(@Valid @RequestBody PasswordResetRequest body,
                                                      HttpServletRequest request) {
     authentication.resetPassword(body.token(), body.newPassword(), ClientContext.from(request));
     return ResponseEntity.ok()
@@ -111,17 +131,10 @@ public class IdentityAuthController {
     return testDeliveries.retrieve(deliveryId, key);
   }
 
-  private static long authenticatedAccountId(HttpServletRequest request) {
-    Object value = request.getAttribute("accountId");
-    if (!(value instanceof Number number)) {
-      throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED,
-          "Not authenticated.");
-    }
-    return number.longValue();
-  }
-
-  record TokenRequest(String token) {}
-  record EmailRequest(String email) {}
-  record LoginRequest(String handleOrEmail, String password) {}
-  record PasswordResetRequest(String token, String newPassword) {}
+  record TokenRequest(@NotBlank @Size(max = 256) String token) {}
+  record EmailRequest(@NotBlank @Email @Size(max = 320) String email) {}
+  record LoginRequest(@NotBlank @Size(max = 320) String handleOrEmail,
+                      @NotBlank @Size(max = 128) String password) {}
+  record PasswordResetRequest(@NotBlank @Size(max = 256) String token,
+                              @NotBlank @Size(min = 12, max = 128) String newPassword) {}
 }

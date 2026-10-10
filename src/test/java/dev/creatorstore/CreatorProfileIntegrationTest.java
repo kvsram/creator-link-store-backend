@@ -4,16 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import dev.creatorstore.bootstrap.DemoDataInitializer;
 import dev.creatorstore.service.CreatorProfileService;
 import jakarta.servlet.http.Cookie;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,13 +31,19 @@ import org.springframework.test.web.servlet.MvcResult;
     "spring.datasource.password=",
     "spring.datasource.driver-class-name=org.h2.Driver",
     "spring.sql.init.mode=never",
-    "instagram.autodm-worker-enabled=false"
+    "instagram.autodm-worker-enabled=false",
+    "app.auth.test-delivery-enabled=true",
+    "app.auth.test-delivery-key=profile-e2e-secret",
+    "app.auth.registration-ip-attempts=100",
+    "app.auth.challenge-ip-attempts=100",
+    "app.auth.challenge-identifier-attempts=100"
 })
 @AutoConfigureMockMvc
-@Sql("/auth-integration-schema.sql")
+@Sql({"/auth-integration-schema.sql", "/tenant-isolation-schema.sql"})
 class CreatorProfileIntegrationTest {
   @Autowired private MockMvc mvc;
   @Autowired private JdbcTemplate database;
+  @Autowired private ObjectMapper json;
 
   @MockitoBean private DemoDataInitializer demoDataInitializer;
 
@@ -173,6 +182,44 @@ class CreatorProfileIntegrationTest {
         .containsEntry("phone", null);
   }
 
+  @Test
+  void userLookupIgnoresAnotherHandleAndReturnsOnlyTheAuthenticatedProfile() throws Exception {
+    Registered owner = register("lookup_owner", "Lookup Owner", "owner-lookup@example.test");
+    register("lookup_other", "Lookup Other", "other-lookup@example.test");
+
+    mvc.perform(get("/api/v1/users/get_user")
+            .queryParam("handle", "lookup_other")
+            .cookie(owner.cookie()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.id").value(owner.id()))
+        .andExpect(jsonPath("$.username").value("lookup_owner"))
+        .andExpect(jsonPath("$.email").value("owner-lookup@example.test"));
+  }
+
+  @Test
+  void tagUpsertUsesTheAuthenticatedTenantAndIgnoresBodyCreatorId() throws Exception {
+    Registered owner = register("tag_owner", "Tag Owner", "tag-owner@example.test");
+    Registered other = register("tag_other", "Tag Other", "tag-other@example.test");
+
+    mvc.perform(put("/api/v1/tags")
+            .cookie(owner.cookie())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"creator_id\":" + other.id() + ",\"name\":\"VIP\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.name").value("VIP"));
+    mvc.perform(put("/api/v1/tags")
+            .cookie(owner.cookie())
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"creator_id\":" + other.id() + ",\"name\":\"VIP\"}"))
+        .andExpect(status().isOk());
+
+    assertThat(database.queryForObject(
+        "select creator_id from tags where name='VIP'", Long.class)).isEqualTo(owner.id());
+    assertThat(database.queryForObject(
+        "select count(*) from tags where creator_id=? and name='VIP'", Integer.class,
+        owner.id())).isOne();
+  }
+
   private Registered register(String handle, String displayName, String email) throws Exception {
     return register(handle, displayName, email, null);
   }
@@ -180,15 +227,27 @@ class CreatorProfileIntegrationTest {
   private Registered register(String handle, String displayName, String email, String phone)
       throws Exception {
     String phoneValue = phone == null ? "null" : "\"" + phone + "\"";
-    MvcResult result = mvc.perform(post("/api/auth/register")
+    MvcResult result = mvc.perform(post("/api/v1/auth/registrations")
             .contentType(MediaType.APPLICATION_JSON)
             .content("""
                 {"handle":"%s","displayName":"%s","email":"%s","phone":%s,
                  "password":"strong-test-password"}
                 """.formatted(handle, displayName, email, phoneValue)))
-        .andExpect(status().isCreated())
+        .andExpect(status().isAccepted())
         .andReturn();
-    Cookie cookie = result.getResponse().getCookie("cs_session");
+    JsonNode registration = json.readTree(result.getResponse().getContentAsString());
+    String deliveryId = registration.get("testDeliveryId").asText();
+    MvcResult delivery = mvc.perform(get("/api/v1/auth/test-deliveries/{id}", deliveryId)
+            .header("X-Test-Auth-Key", "profile-e2e-secret"))
+        .andExpect(status().isOk())
+        .andReturn();
+    String token = json.readTree(delivery.getResponse().getContentAsString()).get("token").asText();
+    MvcResult verified = mvc.perform(post("/api/v1/auth/email-verifications")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"token\":\"" + token + "\"}"))
+        .andExpect(status().isOk())
+        .andReturn();
+    Cookie cookie = verified.getResponse().getCookie("cs_session");
     assertThat(cookie).isNotNull();
     long id = database.queryForObject(
         "select id from creators where handle=?", Long.class, handle);

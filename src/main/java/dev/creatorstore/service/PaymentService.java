@@ -1,7 +1,7 @@
 package dev.creatorstore.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import dev.creatorstore.dto.CheckoutRequest;
 import dev.creatorstore.dto.RazorpayReturnRequest;
 import dev.creatorstore.integration.PaymentProviderClient;
@@ -169,7 +169,7 @@ public class PaymentService {
     if (value.isEmpty()) return null;
     try {
       return json.writeValueAsString(value);
-    } catch (JsonProcessingException impossibleForStringMap) {
+    } catch (JacksonException impossibleForStringMap) {
       throw new IllegalArgumentException("Invalid checkout field responses.", impossibleForStringMap);
     }
   }

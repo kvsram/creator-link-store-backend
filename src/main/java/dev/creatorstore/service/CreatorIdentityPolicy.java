@@ -1,5 +1,6 @@
 package dev.creatorstore.service;
 
+import java.text.Normalizer;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -47,6 +48,31 @@ public final class CreatorIdentityPolicy {
 
   public static boolean isValidPhone(String phone) {
     return phone == null || PHONE.matcher(phone).matches();
+  }
+
+  /** Creates a readable, route-safe base for an automatically assigned store link. */
+  public static String handleBase(String displayName) {
+    String base = Normalizer.normalize(trim(displayName), Normalizer.Form.NFKD)
+        .replaceAll("\\p{M}+", "")
+        .toLowerCase(Locale.ROOT)
+        .replaceAll("[^a-z0-9]+", "_")
+        .replaceAll("^_+|_+$", "")
+        .replaceAll("_+", "_");
+    if (base.length() < 3) base = "creator";
+    return base.substring(0, Math.min(base.length(), 40));
+  }
+
+  /** Adds a non-identifying random suffix while preserving the 40-character route limit. */
+  public static String suffixedHandle(String base, String randomValue) {
+    String suffix = normalize(randomValue).replaceAll("[^a-z0-9]", "");
+    if (suffix.length() < 12) {
+      throw new IllegalArgumentException("A 12-character random suffix is required.");
+    }
+    suffix = suffix.substring(0, 12);
+    String safeBase = handleBase(base);
+    int maximumBaseLength = 40 - suffix.length() - 1;
+    safeBase = safeBase.substring(0, Math.min(safeBase.length(), maximumBaseLength));
+    return safeBase + "_" + suffix;
   }
 
   private static String normalize(Object value) {

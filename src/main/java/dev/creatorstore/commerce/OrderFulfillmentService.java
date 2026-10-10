@@ -1,7 +1,7 @@
 package dev.creatorstore.commerce;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.List;

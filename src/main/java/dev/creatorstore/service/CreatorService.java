@@ -37,7 +37,4 @@ public class CreatorService {
     return Optional.of(response);
   }
 
-  public Map<String, Object> user(String handle) {
-    return creators.findUser(handle);
-  }
 }

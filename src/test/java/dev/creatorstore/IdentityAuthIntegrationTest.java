@@ -9,9 +9,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import dev.creatorstore.bootstrap.DemoDataInitializer;
+import dev.creatorstore.identity.AuthDeliveryRepository;
 import dev.creatorstore.identity.ClientContext;
 import dev.creatorstore.identity.IdentityRepository;
 import dev.creatorstore.identity.PasswordService;
@@ -30,7 +31,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -64,12 +65,80 @@ class IdentityAuthIntegrationTest {
   @Autowired private ObjectMapper json;
   @Autowired private JdbcTemplate database;
   @Autowired private IdentityRepository identities;
+  @Autowired private AuthDeliveryRepository authDeliveries;
   @Autowired private IdentityChallengeTransactionService challenges;
   @Autowired private IdentityLoginTransactionService loginTransactions;
   @Autowired private PasswordService passwordService;
   @Autowired private BCryptPasswordEncoder bcrypt;
 
   @MockitoBean private DemoDataInitializer demoDataInitializer;
+
+  @Test
+  void registrationGeneratesAStoreLinkWhenTheClientDoesNotAskForOne() throws Exception {
+    MvcResult first = mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("Alex Creates", "auto-one@example.test",
+                "twelve-chars")))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.handle").value("alex_creates"))
+        .andReturn();
+
+    MvcResult second = mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("Alex Creates", "auto-two@example.test",
+                "twelve-chars")))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.handle").value(
+            org.hamcrest.Matchers.matchesPattern("alex_creates_[a-z0-9]{12}")))
+        .andReturn();
+
+    String firstHandle = body(first).get("handle").asText();
+    String secondHandle = body(second).get("handle").asText();
+    assertThat(secondHandle).isNotEqualTo(firstHandle);
+    assertThat(database.queryForObject("select count(*) from creator_handles where handle in (?,?) "
+        + "and state='active'", Integer.class, firstHandle, secondHandle)).isEqualTo(2);
+  }
+
+  @Test
+  void registrationKeepsExplicitLinksAndUsesSafeFallbacksForAutomaticOnes() throws Exception {
+    mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registration("chosen_link", "chosen@example.test", "twelve-chars")))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.handle").value("chosen_link"));
+
+    mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("Login", "reserved-name@example.test",
+                "twelve-chars")))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.handle").value(
+            org.hamcrest.Matchers.matchesPattern("login_[a-z0-9]{12}")));
+
+    mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("సృష్టికర్త", "unicode-name@example.test",
+                "twelve-chars")))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.handle").value("creator"));
+  }
+
+  @Test
+  void registrationRejectsElevenCharacterPasswordsAndAcceptsTwelve() throws Exception {
+    mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+        .content(registrationWithoutHandle("Short Password", "short@example.test",
+            "eleven-char")))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+        .andExpect(jsonPath("$.fields.password").value("size must be between 12 and 128"));
+
+    mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registrationWithoutHandle("Valid Password", "valid@example.test",
+                "twelve-chars")))
+        .andExpect(status().isAccepted());
+  }
 
   @Test
   void pendingRegistrationRequiresVerificationThenCreatesAndRevokesADeviceSession()
@@ -95,7 +164,7 @@ class IdentityAuthIntegrationTest {
         "select legacy_verifier from password_credentials where account_id=?", String.class,
         pendingAccountId);
     assertThat(bcrypt.matches(PASSWORD, disabledLegacyVerifier)).isFalse();
-    assertThat(bcrypt.matches(PASSWORD, transitionalLegacyVerifier)).isTrue();
+    assertThat(transitionalLegacyVerifier).isNull();
 
     mvc.perform(post("/api/v1/auth/sessions")
             .contentType(MediaType.APPLICATION_JSON)
@@ -141,7 +210,10 @@ class IdentityAuthIntegrationTest {
     Cookie session = verification.getResponse().getCookie("cs_session");
     assertThat(session).isNotNull();
     assertThat(bcrypt.matches(PASSWORD, database.queryForObject(
-        "select password_hash from creators where id=?", String.class, pendingAccountId))).isTrue();
+        "select password_hash from creators where id=?", String.class, pendingAccountId))).isFalse();
+    assertThat(passwordService.matches(PASSWORD, database.queryForObject(
+        "select verifier from password_credentials where account_id=?", String.class,
+        pendingAccountId))).isTrue();
     assertThat(database.queryForObject("select legacy_verifier from password_credentials "
         + "where account_id=?", String.class, pendingAccountId)).isNull();
     mvc.perform(post("/api/v1/auth/email-verifications")
@@ -215,6 +287,10 @@ class IdentityAuthIntegrationTest {
                 + NEW_PASSWORD + "\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.ok").value(true));
+    assertThat(database.queryForObject("select state from auth_delivery_outbox "
+        + "where delivery_id=?", String.class, UUID.fromString(deliveryId))).isEqualTo("dead");
+    assertThat(database.queryForObject("select token_value from auth_delivery_outbox "
+        + "where delivery_id=?", String.class, UUID.fromString(deliveryId))).isEmpty();
     mvc.perform(get("/api/auth/me").cookie(session)).andExpect(status().isUnauthorized());
     assertThat(database.queryForObject("select count(*) from sessions where id=? "
             + "and revoked_at is not null", Integer.class,
@@ -292,16 +368,7 @@ class IdentityAuthIntegrationTest {
               .content("{\"email\":\"" + email + "\"}"))
           .andExpect(status().isAccepted())
           .andExpect(jsonPath("$.accepted").value(true)).andReturn();
-      String deliveryId = body(request).get("testDeliveryId").asText();
-      MvcResult delivery = mvc.perform(get("/api/v1/auth/test-deliveries/{id}", deliveryId)
-              .header("X-Test-Auth-Key", "identity-e2e-secret"))
-          .andExpect(status().isOk()).andReturn();
-      String token = body(delivery).get("token").asText();
-      mvc.perform(post("/api/v1/auth/password-resets")
-              .contentType(MediaType.APPLICATION_JSON)
-              .content("{\"token\":\"" + token + "\",\"newPassword\":\""
-                  + NEW_PASSWORD + "\"}"))
-          .andExpect(status().isBadRequest());
+      assertThat(body(request).has("testDeliveryId")).isFalse();
     }
     assertThat(database.queryForObject("select count(*) from password_reset_tokens",
         Integer.class)).isZero();
@@ -443,6 +510,81 @@ class IdentityAuthIntegrationTest {
   }
 
   @Test
+  void compatibilityLoginRejectsOversizedInputsBeforeCredentialWork() throws Exception {
+    mvc.perform(post("/api/auth/login")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(login("a".repeat(321), "p".repeat(129))))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+        .andExpect(jsonPath("$.fields.handleOrEmail").exists())
+        .andExpect(jsonPath("$.fields.password").exists());
+  }
+
+  @Test
+  void aNewVerificationDeliverySupersedesTheOlderOutboxSecretAtomically() throws Exception {
+    MvcResult registration = mvc.perform(post("/api/v1/auth/registrations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(registration("resend_owner", "resend-owner@example.test", PASSWORD)))
+        .andExpect(status().isAccepted()).andReturn();
+    UUID firstDelivery = UUID.fromString(body(registration).get("testDeliveryId").asText());
+
+    MvcResult resend = mvc.perform(post("/api/v1/auth/email-verifications/resend")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"email\":\"resend-owner@example.test\"}"))
+        .andExpect(status().isAccepted()).andReturn();
+    UUID secondDelivery = UUID.fromString(body(resend).get("testDeliveryId").asText());
+
+    assertThat(secondDelivery).isNotEqualTo(firstDelivery);
+    assertThat(database.queryForObject("select state from auth_delivery_outbox "
+        + "where delivery_id=?", String.class, firstDelivery)).isEqualTo("dead");
+    assertThat(database.queryForObject("select token_value from auth_delivery_outbox "
+        + "where delivery_id=?", String.class, firstDelivery)).isEmpty();
+    mvc.perform(get("/api/v1/auth/test-deliveries/{id}", firstDelivery)
+            .header("X-Test-Auth-Key", "identity-e2e-secret"))
+        .andExpect(status().isNotFound());
+
+    String currentToken = deliveryToken(secondDelivery.toString());
+    mvc.perform(post("/api/v1/auth/email-verifications")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"token\":\"" + currentToken + "\"}"))
+        .andExpect(status().isOk());
+    assertThat(database.queryForObject("select state from auth_delivery_outbox "
+        + "where delivery_id=?", String.class, secondDelivery)).isEqualTo("dead");
+    assertThat(database.queryForObject("select token_value from auth_delivery_outbox "
+        + "where delivery_id=?", String.class, secondDelivery)).isEmpty();
+  }
+
+  @Test
+  void anExpiredLeaseOwnerCannotOverwriteTheCurrentWorkersCompletion() {
+    String legacy = bcrypt.encode(PASSWORD);
+    database.update("insert into creators(handle,display_name,email,password_hash,bio) "
+            + "values(?,?,?,?,?)", "lease_owner", "Lease Owner", "lease-owner@example.test",
+        legacy, "");
+    long accountId = database.queryForObject("select id from creators where handle=?", Long.class,
+        "lease_owner");
+    identities.provisionExisting(accountId, "lease_owner", "Lease Owner",
+        "lease-owner@example.test", null, legacy);
+    UUID deliveryId = authDeliveries.enqueue(accountId, "password_reset",
+        "lease-owner@example.test", "one-time-secret",
+        OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(30));
+
+    AuthDeliveryRepository.Delivery firstClaim = authDeliveries.claim().orElseThrow();
+    database.update("update auth_delivery_outbox set lease_until=? where delivery_id=?",
+        OffsetDateTime.now(ZoneOffset.UTC).minusSeconds(1), deliveryId);
+    AuthDeliveryRepository.Delivery secondClaim = authDeliveries.claim().orElseThrow();
+
+    assertThat(secondClaim.leaseToken()).isNotEqualTo(firstClaim.leaseToken());
+    assertThat(secondClaim.attempts()).isEqualTo(firstClaim.attempts() + 1);
+    assertThat(authDeliveries.markFailed(firstClaim, "stale worker failed")).isFalse();
+    assertThat(authDeliveries.markSent(firstClaim)).isFalse();
+    assertThat(authDeliveries.markSent(secondClaim)).isTrue();
+    assertThat(database.queryForObject("select state from auth_delivery_outbox "
+        + "where delivery_id=?", String.class, deliveryId)).isEqualTo("sent");
+    assertThat(database.queryForObject("select token_value from auth_delivery_outbox "
+        + "where delivery_id=?", String.class, deliveryId)).isEmpty();
+  }
+
+  @Test
   void concurrentResetRequestsSerializeToOneActiveAccountToken() throws Exception {
     String legacy = bcrypt.encode(PASSWORD);
     database.update("insert into creators(handle,display_name,email,password_hash,bio) "
@@ -460,11 +602,12 @@ class IdentityAuthIntegrationTest {
     List<Future<?>> futures = new ArrayList<>();
     try {
       for (int index = 0; index < workerCount; index++) {
-        String tokenHash = SessionCookies.hash("concurrent-reset-token-" + index);
+        String rawToken = "concurrent-reset-token-" + index;
+        String tokenHash = SessionCookies.hash(rawToken);
         futures.add(executor.submit(() -> {
           ready.countDown();
           start.await();
-          challenges.createPasswordReset("concurrent-reset@example.test", tokenHash,
+          challenges.createPasswordReset("concurrent-reset@example.test", rawToken, tokenHash,
               OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(30));
           return null;
         }));
@@ -478,6 +621,12 @@ class IdentityAuthIntegrationTest {
 
     assertThat(database.queryForObject("select count(*) from password_reset_tokens "
         + "where account_id=? and consumed_at is null", Integer.class, accountId)).isEqualTo(1);
+    assertThat(database.queryForObject("select count(*) from auth_delivery_outbox "
+        + "where account_id=? and delivery_type='password_reset' and state='pending'",
+        Integer.class, accountId)).isEqualTo(1);
+    assertThat(database.queryForObject("select count(*) from auth_delivery_outbox "
+        + "where account_id=? and delivery_type='password_reset' and state='dead' "
+        + "and token_value=''", Integer.class, accountId)).isEqualTo(workerCount - 1);
   }
 
   @Test
@@ -497,7 +646,8 @@ class IdentityAuthIntegrationTest {
     String staleUpgradeCandidate = passwordService.encode(PASSWORD);
 
     String resetHash = SessionCookies.hash("deterministic-reset-between-login-phases");
-    challenges.createPasswordReset("login-reset-race@example.test", resetHash,
+    challenges.createPasswordReset("login-reset-race@example.test",
+        "deterministic-reset-between-login-phases", resetHash,
         OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(30));
     challenges.resetPassword(resetHash, passwordService.encode(NEW_PASSWORD),
         passwordService.legacyVerifier(NEW_PASSWORD));
@@ -549,6 +699,13 @@ class IdentityAuthIntegrationTest {
         {"handle":"%s","displayName":"Test Creator","email":"%s","phone":null,
          "password":"%s"}
         """.formatted(handle, email, password);
+  }
+
+  private static String registrationWithoutHandle(String displayName, String email,
+                                                   String password) {
+    return """
+        {"displayName":"%s","email":"%s","password":"%s"}
+        """.formatted(displayName, email, password);
   }
 
   private static String login(String identifier, String password) {

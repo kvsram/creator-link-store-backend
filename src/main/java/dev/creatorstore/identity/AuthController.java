@@ -5,6 +5,9 @@ import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import dev.creatorstore.service.IdentityAuthenticationService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -21,7 +24,7 @@ public class AuthController {
   }
 
   @PostMapping("/api/auth/login")
-  ResponseEntity<?> login(@RequestBody LoginIn body, HttpServletRequest request) {
+  ResponseEntity<?> login(@Valid @RequestBody LoginIn body, HttpServletRequest request) {
     IdentityAuthenticationService.LoginResult result = authentication.login(
         body.handleOrEmail(), body.password(), ClientContext.from(request));
     return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE,
@@ -43,5 +46,6 @@ public class AuthController {
     return ResponseEntity.ok(authentication.me(SessionCookies.readToken(request)));
   }
 
-  record LoginIn(String handleOrEmail, String password) {}
+  record LoginIn(@NotBlank @Size(max = 320) String handleOrEmail,
+                 @NotBlank @Size(max = 128) String password) {}
 }
