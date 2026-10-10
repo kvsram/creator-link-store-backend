@@ -1,6 +1,6 @@
 name: Backend quality gate
 on:
-  pull_request: { branches: [main] }
+  pull_request: { branches: [main, test] }
   workflow_dispatch:
 permissions: { contents: read }
 jobs:
