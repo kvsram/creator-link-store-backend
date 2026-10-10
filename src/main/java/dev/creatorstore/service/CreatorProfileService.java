@@ -26,6 +26,14 @@ public class CreatorProfileService {
     this.creators = creators;
   }
 
+  public Map<String, Object> get(long creatorId) {
+    Map<String, Object> profile = creators.findProfile(creatorId);
+    if (profile.isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Creator profile not found.");
+    }
+    return profile;
+  }
+
   @Transactional
   public Map<String, Object> update(long creatorId, ProfileUpdateRequest request) {
     if (request == null) throw badRequest(INVALID_PROFILE);

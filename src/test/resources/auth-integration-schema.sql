@@ -1,3 +1,4 @@
+drop table if exists tags;
 drop table if exists auth_security_events;
 drop table if exists password_reset_tokens;
 drop table if exists email_verification_tokens;

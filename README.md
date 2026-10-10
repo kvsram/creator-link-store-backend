@@ -16,7 +16,7 @@ docker compose up -d db
 DB_USER=creator DB_PASSWORD=creator mvn spring-boot:run
 ```
 
-It listens on port 8080 and its inferred PostgreSQL schema is initialized from `src/main/resources/schema.sql`. A clean database seeds the deterministic `alex` demo (its password is a random, intentionally-unusable value — register a real account via `POST /api/auth/register` and log in through `POST /api/auth/login` to get a usable session).
+It listens on port 8080 and its inferred PostgreSQL schema is initialized from `src/main/resources/schema.sql`. A clean database seeds the deterministic `alex` demo (its password is a random, intentionally-unusable value — register a real account, verify its email, and then log in to get a usable session).
 
 India launch defaults are `INR`, Razorpay as the preferred strategy, and both payments and Instagram disabled. `GET /api/v1/payments/config` and `GET /api/v1/integrations/instagram/config` report safe readiness without secrets. Provider modes are `disabled`, `test`, and `live`; use test credentials locally and store deployed secrets in the selected cloud secret manager. Checkout amounts are always loaded server-side and expressed as integer paise in `*_subunits` fields.
 
@@ -25,9 +25,9 @@ India launch defaults are `INR`, Razorpay as the preferred strategy, and both pa
 There are two deliberately distinct contracts during the identity migration:
 
 - The compatibility endpoints `POST /api/auth/register`, `POST /api/auth/login`,
-  `POST /api/auth/logout`, and `GET /api/auth/me` retain the original frontend behavior.
-  Compatibility registration creates an active, grandfathered-as-verified account and immediately
-  issues an httpOnly `cs_session` cookie.
+  `POST /api/auth/logout`, and `GET /api/auth/me` remain available to older clients. Compatibility
+  registration now enforces the same verification-first invariant as v1: it creates a pending
+  account, returns HTTP `202`, and issues no session before email verification.
 - The production-oriented v1 flow starts at `POST /api/v1/auth/registrations`. It creates a
   `pending_verification` account, returns HTTP `202`, and issues no session until
   `POST /api/v1/auth/email-verifications` consumes a valid one-time token. Resend is
@@ -36,7 +36,7 @@ There are two deliberately distinct contracts during the identity migration:
   and suspended/deleted accounts all retain the same generic HTTP `401` response.
 
 Both registration paths atomically create the creator, normalized identity rows, default store,
-notification preferences, and any mandatory session/challenge. A failed insert leaves no partial
+notification preferences, and the mandatory verification challenge. A failed insert leaves no partial
 account. Passwords must contain 12–128 Unicode code points. New normalized credentials use
 Argon2id; existing BCrypt credentials remain valid and are upgraded after a successful login.
 Only password verifiers are stored—never a raw password. Twelve characters is an explicit

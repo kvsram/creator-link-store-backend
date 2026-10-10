@@ -1,12 +1,15 @@
 package dev.creatorstore;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.creatorstore.bootstrap.DemoDataInitializer;
 import dev.creatorstore.identity.SessionService;
@@ -38,24 +41,28 @@ class RegistrationAtomicityIntegrationTest {
   @MockitoBean private SessionService sessions;
 
   @Test
-  void mandatorySessionFailureRollsBackTheEntireCompatibilityRegistration() {
-    when(sessions.issue(anyLong(), any(), anyString()))
-        .thenThrow(new IllegalStateException("simulated session persistence failure"));
-
-    assertThatThrownBy(() -> mvc.perform(post("/api/auth/register")
+  void compatibilityRegistrationIsPendingAndCannotIssueASession() throws Exception {
+    mvc.perform(post("/api/auth/register")
             .contentType(MediaType.APPLICATION_JSON)
             .content("""
                 {"handle":"atomic_creator","displayName":"Atomic Creator",
                  "email":"atomic@example.test","phone":null,
                  "password":"strong-test-password"}
-                """)))
-        .hasRootCauseMessage("simulated session persistence failure");
+                """))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.status").value("pending_verification"))
+        .andExpect(jsonPath("$.authenticated").value(false))
+        .andExpect(jsonPath("$.verificationRequired").value(true))
+        .andExpect(cookie().doesNotExist("cs_session"));
 
     assertThat(database.queryForObject("select count(*) from creators where handle=?",
-        Integer.class, "atomic_creator")).isZero();
-    assertThat(database.queryForObject("select count(*) from accounts", Integer.class)).isZero();
-    assertThat(database.queryForObject("select count(*) from stores", Integer.class)).isZero();
+        Integer.class, "atomic_creator")).isOne();
+    assertThat(database.queryForObject("select count(*) from accounts", Integer.class)).isOne();
+    assertThat(database.queryForObject("select count(*) from stores", Integer.class)).isOne();
     assertThat(database.queryForObject("select count(*) from notification_preferences",
+        Integer.class)).isOne();
+    assertThat(database.queryForObject("select count(*) from auth_sessions",
         Integer.class)).isZero();
+    verify(sessions, never()).issue(anyLong(), any(), anyString());
   }
 }

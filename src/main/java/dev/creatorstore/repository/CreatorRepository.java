@@ -20,13 +20,6 @@ public class CreatorRepository {
         handle);
   }
 
-  public Map<String, Object> findUser(String handle) {
-    return first("select id as \"id\",handle as \"username\","
-        + "display_name as \"display_name\",email as \"email\",phone as \"phone\","
-        + "bio as \"bio\",avatar_url as \"avatar_url\",created_at as \"created_at\" "
-        + "from creators where handle=?", handle);
-  }
-
   public Map<String, Object> findProfile(long creatorId) {
     return first("select id as \"id\",handle as \"username\","
         + "display_name as \"display_name\",email as \"email\",phone as \"phone\","
