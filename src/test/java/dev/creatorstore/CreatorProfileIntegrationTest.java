@@ -72,6 +72,17 @@ class CreatorProfileIntegrationTest {
     assertThat(profile(other.id()))
         .containsEntry("handle", "other_profile")
         .containsEntry("display_name", "Other");
+    assertThat(database.queryForMap("select display_name,bio from creator_profiles "
+        + "where account_id=?", owner.id()))
+        .containsEntry("display_name", "Updated Owner")
+        .containsEntry("bio", "Practical creator systems.");
+    assertThat(database.queryForObject("select state from creator_handles where handle=?",
+        String.class, "owner_profile")).isEqualTo("redirect");
+    assertThat(database.queryForObject("select state from creator_handles where handle=?",
+        String.class, "updated_owner")).isEqualTo("active");
+    assertThat(database.queryForObject("select phone_original from account_phones "
+        + "where account_id=? and is_primary=true", String.class, owner.id()))
+        .isEqualTo("+91 98765 43210");
 
     mvc.perform(get("/api/auth/me").cookie(owner.cookie()))
         .andExpect(status().isOk())

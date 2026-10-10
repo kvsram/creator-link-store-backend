@@ -471,3 +471,205 @@ create table if not exists instagram_dm_jobs (
 
 create index if not exists idx_instagram_dm_jobs_due
   on instagram_dm_jobs(state,next_attempt_at,lease_until);
+
+-- Identity v1 is intentionally additive. Existing commerce tables continue to reference
+-- creators.id while application reads/writes move to these normalized identity tables.
+-- IDs are preserved so the migration does not rewrite every business foreign key at once.
+create table if not exists accounts (
+  id bigint primary key references creators(id) on delete cascade,
+  public_id uuid not null default gen_random_uuid() unique,
+  status varchar(32) not null default 'active'
+    check (status in ('pending_verification','active','suspended','deleted')),
+  session_version integer not null default 1 check (session_version > 0),
+  row_version bigint not null default 0,
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp,
+  deleted_at timestamptz,
+  check ((status='deleted' and deleted_at is not null)
+      or (status<>'deleted' and deleted_at is null))
+);
+
+create table if not exists creator_profiles (
+  account_id bigint primary key references accounts(id) on delete cascade,
+  display_name varchar(80) not null,
+  bio varchar(280) not null default '',
+  avatar_url varchar(2048),
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp,
+  check (length(btrim(display_name)) between 1 and 80)
+);
+
+create table if not exists creator_handles (
+  handle varchar(40) primary key,
+  account_id bigint references accounts(id) on delete cascade,
+  state varchar(16) not null
+    check (state in ('active','redirect','reserved','retired')),
+  claimed_at timestamptz not null default current_timestamp,
+  retired_at timestamptz,
+  check (handle=lower(handle)),
+  check (handle ~ '^[a-z0-9_]{3,40}$'),
+  check ((state='reserved' and account_id is null)
+      or (state<>'reserved' and account_id is not null))
+);
+
+create unique index if not exists uq_creator_handles_active_account
+  on creator_handles(account_id) where state='active';
+
+create table if not exists account_emails (
+  id bigserial primary key,
+  account_id bigint not null references accounts(id) on delete cascade,
+  email_original varchar(320) not null,
+  email_normalized varchar(320) not null unique,
+  is_primary boolean not null default false,
+  verified_at timestamptz,
+  created_at timestamptz not null default current_timestamp,
+  check (email_normalized=lower(btrim(email_normalized))),
+  check (position('@' in email_normalized) > 1)
+);
+
+create unique index if not exists uq_account_emails_one_primary
+  on account_emails(account_id) where is_primary;
+
+create table if not exists account_phones (
+  id bigserial primary key,
+  account_id bigint not null references accounts(id) on delete cascade,
+  phone_original varchar(32) not null,
+  is_primary boolean not null default false,
+  verified_at timestamptz,
+  created_at timestamptz not null default current_timestamp
+);
+
+create unique index if not exists uq_account_phones_one_primary
+  on account_phones(account_id) where is_primary;
+
+create table if not exists password_credentials (
+  account_id bigint primary key references accounts(id) on delete cascade,
+  verifier text not null,
+  legacy_verifier text,
+  changed_at timestamptz not null default current_timestamp,
+  must_change boolean not null default false
+);
+
+alter table password_credentials add column if not exists legacy_verifier text;
+
+create table if not exists account_login_state (
+  account_id bigint primary key references accounts(id) on delete cascade,
+  consecutive_failures integer not null default 0 check (consecutive_failures >= 0),
+  failure_window_started_at timestamptz,
+  last_failed_at timestamptz,
+  locked_until timestamptz,
+  updated_at timestamptz not null default current_timestamp
+);
+
+create table if not exists auth_sessions (
+  id bigserial primary key,
+  public_id uuid not null default gen_random_uuid() unique,
+  account_id bigint not null references accounts(id) on delete cascade,
+  token_hash varchar(64) not null unique,
+  session_version integer not null,
+  auth_method varchar(32) not null default 'password',
+  created_at timestamptz not null default current_timestamp,
+  last_seen_at timestamptz not null default current_timestamp,
+  idle_expires_at timestamptz not null,
+  absolute_expires_at timestamptz not null,
+  revoked_at timestamptz,
+  revocation_reason varchar(80),
+  ip_hmac varchar(64),
+  user_agent_hash varchar(64),
+  check (length(token_hash)=64),
+  check (idle_expires_at <= absolute_expires_at)
+);
+
+create index if not exists idx_auth_sessions_active_account
+  on auth_sessions(account_id,created_at desc) where revoked_at is null;
+create index if not exists idx_auth_sessions_expiry
+  on auth_sessions(absolute_expires_at) where revoked_at is null;
+
+create table if not exists email_verification_tokens (
+  id bigserial primary key,
+  email_id bigint not null references account_emails(id) on delete cascade,
+  token_hash varchar(64) not null unique,
+  created_at timestamptz not null default current_timestamp,
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  check (length(token_hash)=64),
+  check (expires_at > created_at)
+);
+
+create index if not exists idx_email_verification_tokens_expiry
+  on email_verification_tokens(expires_at) where consumed_at is null;
+
+create table if not exists password_reset_tokens (
+  id bigserial primary key,
+  account_id bigint not null references accounts(id) on delete cascade,
+  token_hash varchar(64) not null unique,
+  created_at timestamptz not null default current_timestamp,
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  check (length(token_hash)=64),
+  check (expires_at > created_at)
+);
+
+create index if not exists idx_password_reset_tokens_expiry
+  on password_reset_tokens(expires_at) where consumed_at is null;
+
+create table if not exists auth_security_events (
+  id bigserial primary key,
+  account_id bigint references accounts(id) on delete set null,
+  event_type varchar(64) not null,
+  outcome varchar(24) not null,
+  request_id varchar(80),
+  identifier_hash varchar(64),
+  ip_hmac varchar(64),
+  user_agent_hash varchar(64),
+  metadata_json text not null default '{}',
+  occurred_at timestamptz not null default current_timestamp
+);
+
+create index if not exists idx_auth_security_events_account_time
+  on auth_security_events(account_id,occurred_at desc);
+create index if not exists idx_auth_security_events_time
+  on auth_security_events(occurred_at);
+
+-- Backfill old creator rows and still-valid sessions without changing existing API IDs.
+insert into accounts(id,status,created_at,updated_at)
+select id,'active',created_at,created_at from creators
+on conflict (id) do nothing;
+
+insert into creator_profiles(account_id,display_name,bio,avatar_url,created_at,updated_at)
+select id,display_name,bio,avatar_url,created_at,created_at from creators
+on conflict (account_id) do nothing;
+
+insert into creator_handles(handle,account_id,state,claimed_at)
+select handle,id,'active',created_at from creators
+on conflict (handle) do nothing;
+
+insert into account_emails(account_id,email_original,email_normalized,is_primary,verified_at,
+                           created_at)
+select id,email,lower(btrim(email)),true,created_at,created_at from creators
+on conflict (email_normalized) do nothing;
+
+-- Accounts that pre-date verification were already active; grandfather their primary email.
+update account_emails e set verified_at=e.created_at
+from accounts a
+where a.id=e.account_id and a.status='active' and e.is_primary=true and e.verified_at is null;
+
+insert into account_phones(account_id,phone_original,is_primary,created_at)
+select id,phone,true,created_at from creators where phone is not null
+on conflict do nothing;
+
+insert into password_credentials(account_id,verifier,changed_at)
+select id,password_hash,created_at from creators
+on conflict (account_id) do nothing;
+
+insert into account_login_state(account_id)
+select id from creators
+on conflict (account_id) do nothing;
+
+insert into auth_sessions(account_id,token_hash,session_version,created_at,last_seen_at,
+                          idle_expires_at,absolute_expires_at,revoked_at,revocation_reason)
+select s.creator_id,s.id,a.session_version,s.created_at,s.created_at,
+       least(s.expires_at,current_timestamp + interval '12 hours'),s.expires_at,s.revoked_at,
+       case when s.revoked_at is null then null else 'legacy_revocation' end
+from sessions s join accounts a on a.id=s.creator_id
+on conflict (token_hash) do nothing;

@@ -35,13 +35,13 @@ public class CreatorRepository {
   }
 
   public boolean handleExists(String handle) {
-    return database.queryForObject("select count(*) from creators where handle=?", Integer.class, handle) > 0;
+    return database.queryForObject("select count(*) from creator_handles where handle=?",
+        Integer.class, handle) > 0;
   }
 
   public boolean handleExistsForOtherCreator(String handle, long creatorId) {
-    return database.queryForObject(
-        "select count(*) from creators where handle=? and id<>?", Integer.class, handle,
-        creatorId) > 0;
+    return database.queryForObject("select count(*) from creator_handles where handle=? "
+            + "and not (account_id=? and state='active')", Integer.class, handle, creatorId) > 0;
   }
 
   public boolean emailExists(String email) {
@@ -56,9 +56,30 @@ public class CreatorRepository {
 
   public int updateProfile(long creatorId, String handle, String displayName, String bio,
                            String phone) {
-    return database.update(
+    List<String> activeHandles = database.queryForList(
+        "select handle from creator_handles where account_id=? and state='active'",
+        String.class, creatorId);
+    if (!activeHandles.isEmpty() && !activeHandles.get(0).equals(handle)) {
+      database.update("update creator_handles set state='redirect',retired_at=current_timestamp "
+          + "where account_id=? and state='active'", creatorId);
+      database.update("insert into creator_handles(handle,account_id,state) values(?,?,'active')",
+          handle, creatorId);
+    }
+    database.update("update creator_profiles set display_name=?,bio=?,updated_at=current_timestamp "
+        + "where account_id=?", displayName, bio, creatorId);
+    database.update("delete from account_phones where account_id=?", creatorId);
+    if (phone != null) {
+      database.update("insert into account_phones(account_id,phone_original,is_primary) "
+          + "values(?,?,true)", creatorId, phone);
+    }
+    int updated = database.update(
         "update creators set handle=?,display_name=?,bio=?,phone=? where id=?",
         handle, displayName, bio, phone, creatorId);
+    if (updated > 0) {
+      database.update("update accounts set updated_at=current_timestamp,row_version=row_version+1 "
+          + "where id=?", creatorId);
+    }
+    return updated;
   }
 
   private Map<String, Object> first(String sql, Object... args) {

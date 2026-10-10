@@ -1,6 +1,7 @@
 package dev.creatorstore.controller;
 
 import dev.creatorstore.dto.RegisterRequest;
+import dev.creatorstore.identity.ClientContext;
 import dev.creatorstore.identity.SessionService;
 import dev.creatorstore.service.AuthenticationService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -36,7 +37,8 @@ public class AuthenticationController {
   @PostMapping("/api/auth/register")
   public ResponseEntity<Map<String, Object>> register(@RequestBody RegisterRequest request,
       HttpServletRequest httpRequest) {
-    AuthenticationService.Registration registration = authentication.register(request);
+    AuthenticationService.Registration registration = authentication.register(request,
+        ClientContext.from(httpRequest));
     return ResponseEntity.status(201)
         .header(HttpHeaders.SET_COOKIE,
             sessions.cookie(registration.session(), httpRequest.isSecure()).toString())

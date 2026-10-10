@@ -5,6 +5,18 @@ app:
   allowed-origins: ${APP_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
   storage-dir: ${APP_STORAGE_DIR:./data/uploads}
   secure-cookies: ${APP_SECURE_COOKIES:false}
+  auth:
+    # Test mailbox is intentionally inert unless both values are explicitly supplied.
+    test-delivery-enabled: ${APP_AUTH_TEST_DELIVERY_ENABLED:false}
+    test-delivery-key: ${APP_AUTH_TEST_DELIVERY_KEY:}
+    fingerprint-secret: ${APP_AUTH_FINGERPRINT_SECRET:}
+    login-ip-attempts: ${APP_AUTH_LOGIN_IP_ATTEMPTS:30}
+    login-ip-window: ${APP_AUTH_LOGIN_IP_WINDOW:PT5M}
+    registration-ip-attempts: ${APP_AUTH_REGISTRATION_IP_ATTEMPTS:10}
+    registration-ip-window: ${APP_AUTH_REGISTRATION_IP_WINDOW:PT1H}
+    challenge-ip-attempts: ${APP_AUTH_CHALLENGE_IP_ATTEMPTS:20}
+    challenge-identifier-attempts: ${APP_AUTH_CHALLENGE_IDENTIFIER_ATTEMPTS:5}
+    challenge-window: ${APP_AUTH_CHALLENGE_WINDOW:PT15M}
 spring:
   servlet:
     multipart:

@@ -85,10 +85,13 @@ class RegistrationSessionIntegrationTest {
     assertThat(database.queryForObject(
         "select count(*) from notification_preferences where creator_id=?", Integer.class,
         creatorId)).isEqualTo(1);
+    assertThat(database.queryForObject("select verified_at is not null from account_emails "
+        + "where account_id=? and is_primary=true", Boolean.class, creatorId)).isTrue();
     assertThat(database.queryForObject(
-        "select count(*) from sessions where creator_id=?", Integer.class, creatorId)).isEqualTo(1);
+        "select count(*) from auth_sessions where account_id=?", Integer.class, creatorId)).isEqualTo(1);
     assertThat(database.queryForObject(
-        "select count(*) from sessions where id=?", Integer.class, sessionCookie.getValue()))
+        "select count(*) from auth_sessions where token_hash=?", Integer.class,
+        sessionCookie.getValue()))
         .isZero();
 
     mvc.perform(get("/api/auth/me").cookie(sessionCookie))

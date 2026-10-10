@@ -1,5 +1,6 @@
 package dev.creatorstore.bootstrap;
 
+import dev.creatorstore.identity.IdentityRepository;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.boot.CommandLineRunner;
@@ -11,10 +12,13 @@ import org.springframework.stereotype.Component;
 public class DemoDataInitializer implements CommandLineRunner {
   private final JdbcTemplate database;
   private final BCryptPasswordEncoder passwordEncoder;
+  private final IdentityRepository identities;
 
-  public DemoDataInitializer(JdbcTemplate database, BCryptPasswordEncoder passwordEncoder) {
+  public DemoDataInitializer(JdbcTemplate database, BCryptPasswordEncoder passwordEncoder,
+                             IdentityRepository identities) {
     this.database = database;
     this.passwordEncoder = passwordEncoder;
+    this.identities = identities;
   }
 
   @Override
@@ -25,6 +29,8 @@ public class DemoDataInitializer implements CommandLineRunner {
         "alex", "Alex Rivera", "alex@example.test", disabledCredential,
         "Systems and templates for independent creators.");
     long creatorId = database.queryForObject("select id from creators where handle='alex'", Long.class);
+    identities.provisionExisting(creatorId, "alex", "Alex Rivera", "alex@example.test", null,
+        disabledCredential);
     database.update("insert into stores(creator_id,title,currency,payouts_enabled) values(?,?,?,?)",
         creatorId, "Alex's Creator Store", "INR", false);
     database.update("insert into links(creator_id,title,url,position) values(?,?,?,?)",

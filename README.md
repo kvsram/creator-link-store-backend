@@ -22,13 +22,41 @@ India launch defaults are `INR`, Razorpay as the preferred strategy, and both pa
 
 ## Authentication
 
-`POST /api/auth/register` creates a creator (BCrypt-hashed password) and immediately issues
-the same httpOnly session cookie used by login. Creator, default store, notification preferences,
-and the hashed session are inserted in one database transaction; a failed insert leaves no partial
-account. The cookie carries a 30-day opaque token while only its SHA-256 hash is stored — no JWT
-or additional signing secret is required. `POST /api/auth/login` (handle-or-email + password)
-issues another session, `POST /api/auth/logout` revokes it, and `GET /api/auth/me` returns the
-current profile. Every `/api/v1/**` route requires this session except the
+There are two deliberately distinct contracts during the identity migration:
+
+- The compatibility endpoints `POST /api/auth/register`, `POST /api/auth/login`,
+  `POST /api/auth/logout`, and `GET /api/auth/me` retain the original frontend behavior.
+  Compatibility registration creates an active, grandfathered-as-verified account and immediately
+  issues an httpOnly `cs_session` cookie.
+- The production-oriented v1 flow starts at `POST /api/v1/auth/registrations`. It creates a
+  `pending_verification` account, returns HTTP `202`, and issues no session until
+  `POST /api/v1/auth/email-verifications` consumes a valid one-time token. Resend is
+  `POST /api/v1/auth/email-verifications/resend`. A correct password for a pending account returns
+  HTTP `403` with `code: "EMAIL_NOT_VERIFIED"`; unknown accounts, wrong passwords, locked accounts,
+  and suspended/deleted accounts all retain the same generic HTTP `401` response.
+
+Both registration paths atomically create the creator, normalized identity rows, default store,
+notification preferences, and any mandatory session/challenge. A failed insert leaves no partial
+account. Passwords must contain 15–128 Unicode code points. New normalized credentials use
+Argon2id; existing BCrypt credentials remain valid and are upgraded after a successful login.
+Only password verifiers are stored—never a raw password.
+
+The cookie carries a random 30-day opaque token while the database stores only its SHA-256 hash.
+Sessions also have a rolling 12-hour idle expiry and a database `session_version`. The v1 session
+endpoints are:
+
+- `POST /api/v1/auth/sessions` — log in with `handleOrEmail` and `password`.
+- `GET /api/v1/auth/sessions` — list active devices with `publicId`, `createdAt`, `lastSeenAt`,
+  `idleExpiresAt`, `expiresAt`, `authMethod`, `device`, `location`, and `current`.
+- `DELETE /api/v1/auth/sessions/current` or
+  `DELETE /api/v1/auth/sessions/{publicId}` — revoke one session.
+- `POST /api/v1/auth/password-reset-requests` with `email` — always returns a generic accepted
+  response; only an active account with a verified primary email receives a usable challenge.
+- `POST /api/v1/auth/password-resets` with `token` and `newPassword` — consumes the challenge once,
+  updates both transition-era password columns, bumps `session_version`, and revokes every legacy
+  and v1 session.
+
+Every `/api/v1/**` route requires a valid session except the
 public/webhook/checkout paths a buyer or payment provider needs to hit anonymously — see
 `identity/AuthInterceptor.java` for the exact allowlist. Authenticated creator APIs resolve
 `creatorId` only from the session. Public checkout accepts the storefront creator ID but verifies
@@ -43,6 +71,41 @@ premium entitlement. Premium signup must be implemented as a separate, authentic
 provider-hosted/tokenized checkout: the provider returns an opaque payment-method/customer ID,
 and only a verified payment webhook may activate the paid subscription. Until that creator-billing
 model exists, the registration response honestly reports `plan: "free"`.
+
+### Verification delivery and authentication configuration
+
+There is no real email provider in this test release. Verification and reset tokens are never
+returned by normal production endpoints. For automated development testing only, an in-memory test
+mailbox can be enabled with both `APP_AUTH_TEST_DELIVERY_ENABLED=true` and a strong
+`APP_AUTH_TEST_DELIVERY_KEY`. The response then includes a one-time `testDeliveryId`; an authorized
+test operator may retrieve it from `GET /api/v1/auth/test-deliveries/{deliveryId}` using the
+`X-Test-Auth-Key` header. This feature is disabled by default, stores nothing durably, must remain
+disabled in production, and the key must not be committed or exposed to browser users.
+
+Relevant environment settings are:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `APP_AUTH_TEST_DELIVERY_ENABLED` | `false` | Enables the development-only mailbox. |
+| `APP_AUTH_TEST_DELIVERY_KEY` | empty | Operator key required to read a test delivery. |
+| `APP_AUTH_FINGERPRINT_SECRET` | empty | HMAC secret for non-plaintext security fingerprints; set outside local development. |
+| `APP_AUTH_LOGIN_IP_ATTEMPTS` / `APP_AUTH_LOGIN_IP_WINDOW` | `30` / `PT5M` | Per-instance login guard. |
+| `APP_AUTH_REGISTRATION_IP_ATTEMPTS` / `APP_AUTH_REGISTRATION_IP_WINDOW` | `10` / `PT1H` | Protects password hashing and account creation. |
+| `APP_AUTH_CHALLENGE_IP_ATTEMPTS` | `20` | Per-IP verification and password-challenge guard. |
+| `APP_AUTH_CHALLENGE_IDENTIFIER_ATTEMPTS` | `5` | Per-normalized-email challenge guard without disclosing account existence. |
+| `APP_AUTH_CHALLENGE_WINDOW` | `PT15M` | Window used by both challenge guards. |
+
+These bounded in-memory guards are suitable only for the current single-instance test deployment;
+move the counters to Redis or an edge rate-limiter before scaling to multiple application replicas.
+
+The schema migration is additive: legacy `creators` and `sessions` remain the compatibility
+surface while normalized accounts, profiles, handles, credentials, challenges, audit events, and
+sessions are backfilled. Existing active users are grandfathered with a verified primary email.
+Pending accounts keep an unusable random BCrypt value in the legacy creator row until verification,
+preventing an old-image rollback from bypassing verification. Logout/reset revoke legacy and v1
+sessions, and the new resolver honors a legacy revocation. Deploy this version with a Recreate
+strategy rather than mixed old/new application pods; rolling mixed-version issuance is not
+supported, and rolling back to the old image intentionally logs out sessions created only by v1.
 
 `POST /api/v1/authentication/check-unique-taken` checks only the public store handle. It returns
 `handle_taken`, the compatibility alias `username_taken`, and `available`; it deliberately ignores

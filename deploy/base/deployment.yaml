@@ -4,6 +4,9 @@ metadata:
   name: creator-store-api
 spec:
   replicas: 1
+  # Identity v1 keeps rollback-compatible data but does not support mixed old/new pod issuance.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: creator-store-api
