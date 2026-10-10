@@ -1,7 +1,7 @@
 package dev.creatorstore.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import dev.creatorstore.repository.CheckoutRepository;
 import dev.creatorstore.repository.WebhookRepository;
 import dev.creatorstore.security.Signatures;

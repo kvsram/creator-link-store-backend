@@ -1,8 +1,8 @@
 package dev.creatorstore.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import dev.creatorstore.domain.ProductTypeConfiguration;
 import dev.creatorstore.domain.ProductTypeConfiguration.Community;
 import dev.creatorstore.domain.ProductTypeConfiguration.Course;
@@ -79,7 +79,7 @@ public class ProductConfigurationService {
       String encoded = json.writeValueAsString(validator.editorSnapshot(configuration));
       if (encoded.length() > 50_000) throw badRequest("product configuration is too large");
       return encoded;
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw badRequest("product configuration is not valid JSON");
     }
   }
@@ -87,7 +87,7 @@ public class ProductConfigurationService {
   public Map<String, Object> parseSnapshot(Object encoded) {
     if (encoded == null || String.valueOf(encoded).isBlank()) return Map.of();
     try { return json.readValue(String.valueOf(encoded), MAP_TYPE); }
-    catch (JsonProcessingException exception) { throw badRequest("stored product configuration is invalid"); }
+    catch (JacksonException exception) { throw badRequest("stored product configuration is invalid"); }
   }
 
   public String subtitle(String value) { return limited(value, 160, "subtitle"); }
