@@ -13,6 +13,9 @@ public class AuthInterceptor implements HandlerInterceptor {
 
   @Override
   public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+    // CORS preflight is read-only and is validated by Spring's CORS processor/OriginGuard.
+    // The browser's subsequent method still passes through the normal authentication rules.
+    if ("OPTIONS".equals(request.getMethod())) return true;
     if (isPublicAuthenticationRequest(request)) return true;
     String token = SessionCookies.readToken(request);
     var session = sessions.resolve(token);

@@ -127,7 +127,11 @@ public class IdentityRepository {
         + "and is_primary=true", Long.class, accountId);
   }
 
-  public Optional<EmailAccount> findByEmail(String normalizedEmail) {
+  public Optional<EmailAccount> findByEmailForUpdate(String normalizedEmail) {
+    List<Long> accountIds = database.queryForList("select account_id from account_emails "
+        + "where email_normalized=?", Long.class, normalizedEmail);
+    if (accountIds.isEmpty()) return Optional.empty();
+    lockAccount(accountIds.get(0));
     List<EmailAccount> rows = database.query("select e.id as email_id,e.account_id,e.email_normalized,"
             + "e.verified_at,a.status from account_emails e join accounts a on a.id=e.account_id "
             + "where e.email_normalized=?",
@@ -139,6 +143,8 @@ public class IdentityRepository {
 
   public void createEmailVerificationToken(long emailId, String tokenHash,
                                            OffsetDateTime expiresAt) {
+    database.queryForObject("select a.id from accounts a join account_emails e "
+        + "on e.account_id=a.id where e.id=? for update", Long.class, emailId);
     database.update("update email_verification_tokens set consumed_at=current_timestamp "
         + "where email_id=? and consumed_at is null", emailId);
     database.update("insert into email_verification_tokens(email_id,token_hash,expires_at) "
@@ -146,6 +152,11 @@ public class IdentityRepository {
   }
 
   public Optional<TokenAccount> findEmailVerificationForUpdate(String tokenHash) {
+    List<Long> accountIds = database.queryForList("select e.account_id from "
+        + "email_verification_tokens t join account_emails e on e.id=t.email_id "
+        + "where t.token_hash=?", Long.class, tokenHash);
+    if (accountIds.isEmpty()) return Optional.empty();
+    lockAccount(accountIds.get(0));
     List<TokenAccount> rows = database.query("select t.id,e.account_id from "
             + "email_verification_tokens t join account_emails e on e.id=t.email_id "
             + "join accounts a on a.id=e.account_id and a.status='pending_verification' "
@@ -155,9 +166,10 @@ public class IdentityRepository {
     return rows.stream().findFirst();
   }
 
-  public void consumeEmailVerification(long tokenId, long accountId) {
-    database.update("update email_verification_tokens set consumed_at=current_timestamp where id=?",
-        tokenId);
+  public void consumeEmailVerification(long accountId) {
+    database.update("update email_verification_tokens set consumed_at=current_timestamp "
+        + "where consumed_at is null and email_id in (select id from account_emails "
+        + "where account_id=?)", accountId);
     database.update("update account_emails set verified_at=current_timestamp where account_id=? "
         + "and is_primary=true", accountId);
     database.update("update creators set password_hash=(select legacy_verifier from "
@@ -172,6 +184,8 @@ public class IdentityRepository {
 
   public void createPasswordResetToken(long accountId, String tokenHash,
                                        OffsetDateTime expiresAt) {
+    database.queryForObject("select id from accounts where id=? for update", Long.class,
+        accountId);
     database.update("update password_reset_tokens set consumed_at=current_timestamp "
         + "where account_id=? and consumed_at is null", accountId);
     database.update("insert into password_reset_tokens(account_id,token_hash,expires_at) "
@@ -179,6 +193,10 @@ public class IdentityRepository {
   }
 
   public Optional<TokenAccount> findPasswordResetForUpdate(String tokenHash) {
+    List<Long> accountIds = database.queryForList("select account_id from password_reset_tokens "
+        + "where token_hash=?", Long.class, tokenHash);
+    if (accountIds.isEmpty()) return Optional.empty();
+    lockAccount(accountIds.get(0));
     List<TokenAccount> rows = database.query("select t.id,t.account_id from password_reset_tokens t "
             + "join accounts a on a.id=t.account_id and a.status='active' "
             + "join account_emails e on e.account_id=a.id and e.is_primary=true "
@@ -198,10 +216,9 @@ public class IdentityRepository {
     return count != null && count > 0;
   }
 
-  public void consumePasswordReset(long tokenId, long accountId, String verifier,
-                                   String legacyVerifier) {
-    database.update("update password_reset_tokens set consumed_at=current_timestamp where id=?",
-        tokenId);
+  public void consumePasswordReset(long accountId, String verifier, String legacyVerifier) {
+    database.update("update password_reset_tokens set consumed_at=current_timestamp "
+        + "where account_id=? and consumed_at is null", accountId);
     database.update("update password_credentials set verifier=?,legacy_verifier=null,"
         + "changed_at=current_timestamp,must_change=false where account_id=?", verifier,
         accountId);
@@ -224,6 +241,11 @@ public class IdentityRepository {
 
   public OffsetDateTime now() {
     return OffsetDateTime.now(ZoneOffset.UTC);
+  }
+
+  private void lockAccount(long accountId) {
+    database.queryForObject("select id from accounts where id=? for update", Long.class,
+        accountId);
   }
 
   public record LoginAccount(long id, UUID publicId, String status, int sessionVersion,

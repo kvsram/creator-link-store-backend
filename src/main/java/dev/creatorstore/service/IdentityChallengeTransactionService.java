@@ -27,7 +27,7 @@ public class IdentityChallengeTransactionService {
     var challenge = identities.findEmailVerificationForUpdate(tokenHash)
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
             "Verification token is invalid or expired."));
-    identities.consumeEmailVerification(challenge.tokenId(), challenge.accountId());
+    identities.consumeEmailVerification(challenge.accountId());
     SessionService.IssuedSession session = sessions.issue(challenge.accountId(), context,
         "email_verification");
     return new VerifiedEmail(challenge.accountId(), session);
@@ -36,7 +36,8 @@ public class IdentityChallengeTransactionService {
   @Transactional
   public Optional<Long> createEmailVerification(String normalizedEmail, String tokenHash,
                                                  OffsetDateTime expiry) {
-    Optional<IdentityRepository.EmailAccount> eligible = identities.findByEmail(normalizedEmail)
+    Optional<IdentityRepository.EmailAccount> eligible =
+        identities.findByEmailForUpdate(normalizedEmail)
         .filter(value -> value.verifiedAt() == null
             && "pending_verification".equals(value.status()));
     eligible.ifPresent(value -> identities.createEmailVerificationToken(value.emailId(),
@@ -47,7 +48,8 @@ public class IdentityChallengeTransactionService {
   @Transactional
   public Optional<Long> createPasswordReset(String normalizedEmail, String tokenHash,
                                              OffsetDateTime expiry) {
-    Optional<IdentityRepository.EmailAccount> eligible = identities.findByEmail(normalizedEmail)
+    Optional<IdentityRepository.EmailAccount> eligible =
+        identities.findByEmailForUpdate(normalizedEmail)
         .filter(value -> "active".equals(value.status()) && value.verifiedAt() != null);
     eligible.ifPresent(value -> identities.createPasswordResetToken(value.accountId(), tokenHash,
         expiry));
@@ -59,8 +61,7 @@ public class IdentityChallengeTransactionService {
     var challenge = identities.findPasswordResetForUpdate(tokenHash)
         .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
             "Password-reset token is invalid or expired."));
-    identities.consumePasswordReset(challenge.tokenId(), challenge.accountId(), verifier,
-        legacyVerifier);
+    identities.consumePasswordReset(challenge.accountId(), verifier, legacyVerifier);
     return challenge.accountId();
   }
 

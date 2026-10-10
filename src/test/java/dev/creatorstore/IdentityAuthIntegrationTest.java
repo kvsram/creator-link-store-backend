@@ -3,6 +3,7 @@ package dev.creatorstore;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -13,10 +14,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.creatorstore.bootstrap.DemoDataInitializer;
 import dev.creatorstore.identity.IdentityRepository;
 import dev.creatorstore.identity.SessionCookies;
+import dev.creatorstore.service.IdentityChallengeTransactionService;
 import jakarta.servlet.http.Cookie;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -53,6 +61,7 @@ class IdentityAuthIntegrationTest {
   @Autowired private ObjectMapper json;
   @Autowired private JdbcTemplate database;
   @Autowired private IdentityRepository identities;
+  @Autowired private IdentityChallengeTransactionService challenges;
   @Autowired private BCryptPasswordEncoder bcrypt;
 
   @MockitoBean private DemoDataInitializer demoDataInitializer;
@@ -109,6 +118,12 @@ class IdentityAuthIntegrationTest {
         .andExpect(jsonPath("$.type").value("email_verification"))
         .andReturn();
     String token = body(delivery).get("token").asText();
+    String siblingVerificationToken = SessionCookies.newToken();
+    long pendingEmailId = database.queryForObject("select id from account_emails where account_id=?",
+        Long.class, pendingAccountId);
+    database.update("insert into email_verification_tokens(email_id,token_hash,expires_at) "
+            + "values(?,?,?)", pendingEmailId, SessionCookies.hash(siblingVerificationToken),
+        OffsetDateTime.now(ZoneOffset.UTC).plusHours(1));
 
     MvcResult verification = mvc.perform(post("/api/v1/auth/email-verifications")
             .contentType(MediaType.APPLICATION_JSON)
@@ -124,6 +139,10 @@ class IdentityAuthIntegrationTest {
         "select password_hash from creators where id=?", String.class, pendingAccountId))).isTrue();
     assertThat(database.queryForObject("select legacy_verifier from password_credentials "
         + "where account_id=?", String.class, pendingAccountId)).isNull();
+    mvc.perform(post("/api/v1/auth/email-verifications")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"token\":\"" + siblingVerificationToken + "\"}"))
+        .andExpect(status().isBadRequest());
 
     mvc.perform(post("/api/v1/auth/email-verifications")
             .contentType(MediaType.APPLICATION_JSON)
@@ -180,6 +199,10 @@ class IdentityAuthIntegrationTest {
     database.update("insert into sessions(id,creator_id,expires_at) values(?,?,?)",
         SessionCookies.hash(session.getValue()), resetAccountId,
         OffsetDateTime.now(ZoneOffset.UTC).plusDays(1));
+    String siblingResetToken = SessionCookies.newToken();
+    database.update("insert into password_reset_tokens(account_id,token_hash,expires_at) "
+            + "values(?,?,?)", resetAccountId, SessionCookies.hash(siblingResetToken),
+        OffsetDateTime.now(ZoneOffset.UTC).plusHours(1));
 
     mvc.perform(post("/api/v1/auth/password-resets")
             .contentType(MediaType.APPLICATION_JSON)
@@ -202,6 +225,13 @@ class IdentityAuthIntegrationTest {
             .content("{\"token\":\"" + token + "\",\"newPassword\":\""
                 + PASSWORD + "\"}"))
         .andExpect(status().isBadRequest());
+    mvc.perform(post("/api/v1/auth/password-resets")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"token\":\"" + siblingResetToken + "\",\"newPassword\":\""
+                + PASSWORD + "\"}"))
+        .andExpect(status().isBadRequest());
+    assertThat(database.queryForObject("select count(*) from password_reset_tokens "
+        + "where account_id=? and consumed_at is null", Integer.class, resetAccountId)).isZero();
   }
 
   @Test
@@ -384,6 +414,65 @@ class IdentityAuthIntegrationTest {
         .andExpect(status().isAccepted());
     assertThat(database.queryForObject("select request_id from auth_security_events "
         + "where event_type='ACCOUNT_REGISTERED'", String.class)).isNull();
+  }
+
+  @Test
+  void corsPreflightIsAllowedButTheProtectedActualSessionRequestStillRequiresAuth()
+      throws Exception {
+    for (String path : new String[]{"/api/v1/auth/registrations", "/api/v1/auth/sessions",
+        "/api/v1/auth/password-resets"}) {
+      mvc.perform(options(path)
+              .header("Origin", "http://localhost:5173")
+              .header("Access-Control-Request-Method", "POST")
+              .header("Access-Control-Request-Headers", "content-type"))
+          .andExpect(status().isOk())
+          .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+              .string("Access-Control-Allow-Origin", "http://localhost:5173"));
+    }
+    mvc.perform(options("/api/v1/auth/sessions")
+            .header("Origin", "http://localhost:5173")
+            .header("Access-Control-Request-Method", "GET"))
+        .andExpect(status().isOk());
+    mvc.perform(get("/api/v1/auth/sessions"))
+        .andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void concurrentResetRequestsSerializeToOneActiveAccountToken() throws Exception {
+    String legacy = bcrypt.encode(PASSWORD);
+    database.update("insert into creators(handle,display_name,email,password_hash,bio) "
+        + "values(?,?,?,?,?)", "concurrent_reset", "Concurrent Reset",
+        "concurrent-reset@example.test", legacy, "");
+    long accountId = database.queryForObject("select id from creators where handle=?",
+        Long.class, "concurrent_reset");
+    identities.provisionExisting(accountId, "concurrent_reset", "Concurrent Reset",
+        "concurrent-reset@example.test", null, legacy);
+
+    int workerCount = 4;
+    var executor = Executors.newFixedThreadPool(workerCount);
+    CountDownLatch ready = new CountDownLatch(workerCount);
+    CountDownLatch start = new CountDownLatch(1);
+    List<Future<?>> futures = new ArrayList<>();
+    try {
+      for (int index = 0; index < workerCount; index++) {
+        String tokenHash = SessionCookies.hash("concurrent-reset-token-" + index);
+        futures.add(executor.submit(() -> {
+          ready.countDown();
+          start.await();
+          challenges.createPasswordReset("concurrent-reset@example.test", tokenHash,
+              OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(30));
+          return null;
+        }));
+      }
+      assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+      for (Future<?> future : futures) future.get(10, TimeUnit.SECONDS);
+    } finally {
+      executor.shutdownNow();
+    }
+
+    assertThat(database.queryForObject("select count(*) from password_reset_tokens "
+        + "where account_id=? and consumed_at is null", Integer.class, accountId)).isEqualTo(1);
   }
 
   private Cookie registerAndVerify(String handle, String email, String password) throws Exception {
