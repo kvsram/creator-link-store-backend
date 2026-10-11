@@ -1,0 +1,11 @@
+# Active only with SPRING_PROFILES_ACTIVE=local (docker-compose sets it; the cloud never does).
+# Everything here is a development convenience, never a production setting.
+
+app:
+  seed:
+    creator-username: ${SEED_CREATOR_USERNAME:demo}
+    creator-password: ${SEED_CREATOR_PASSWORD:demo-password-123}
+
+logging:
+  level:
+    com.creatorstore: DEBUG
