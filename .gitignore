@@ -7,3 +7,5 @@ target/
 .classpath
 .DS_Store
 *.log
+# per-machine Claude Code settings (paths, JAVA_HOME)
+CLAUDE.local.md
