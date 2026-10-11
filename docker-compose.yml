@@ -1,5 +1,7 @@
-# Local development: `docker compose up -d db` then `mvn spring-boot:run`,
-# or `docker compose up --build` to run the API in a container too.
+# Local development.
+#   make up      -> PostgreSQL + Redis + the API (built from this checkout), seeded with a demo creator and admin
+#   make db      -> only PostgreSQL + Redis, then run the API from your IDE or `make run`
+#   make smoke   -> walks the auth flow against http://localhost:8080
 services:
   db:
     image: postgres:16-alpine
@@ -17,12 +19,28 @@ services:
       timeout: 3s
       retries: 10
 
+  # Not used by the application yet. It is here so the local environment has the same shape as the
+  # design (rate limits and the storefront cache arrive with E2.1); the Spring Redis dependency is added then.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]   # cache only: nothing to persist locally
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build: .
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
+      SPRING_PROFILES_ACTIVE: local          # enables the demo seed (DevSeed); never set in the cloud
       DB_URL: jdbc:postgresql://db:5432/creatorstore
       DB_USER: creatorstore
       DB_PASSWORD: creatorstore
