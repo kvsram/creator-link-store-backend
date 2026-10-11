@@ -1,24 +1,56 @@
-# Creator Link Store API
+# Creator Link Store — backend
 
-Spring Boot API for the sectioned creator admin, public storefront, products, customers, orders, analytics, integrations, and automation metadata.
+Spring Boot modular monolith for the Creator Link Store platform: creators sell digital products,
+courses and bookings from a link-in-bio page; Instagram keyword auto-DMs send followers a personalised link.
+
+**Start with [HANDOFF.md](HANDOFF.md).** It holds the module rules, what is implemented, and what to build next.
+The design this code follows is the "Creator Store — High-Level Design" document (launch design, distributed
+design and delivery plan).
+
+## Run locally
+
+Requirements: Java 21, Maven 3.9, Docker.
 
 ```bash
 docker compose up -d db
-mvn spring-boot:run
+export JWT_SECRET='any-random-string-of-at-least-32-characters'
+export ADMIN_BOOTSTRAP_EMAIL=admin@example.test
+export ADMIN_BOOTSTRAP_PASSWORD='local-admin-password-123'
+mvn spring-boot:run                 # http://localhost:8080
 ```
 
-It listens on port 8080 and its inferred PostgreSQL schema is initialized from `src/main/resources/schema.sql`. A clean database seeds the deterministic `alex` demo. This schema and its response bodies are original project contracts, not a claim about Stan's private database or responses.
+Or everything in containers: `docker compose up --build`.
 
-India launch defaults are `INR`, Razorpay as the preferred strategy, and both payments and Instagram disabled. `GET /api/v1/payments/config` and `GET /api/v1/integrations/instagram/config` report safe readiness without secrets. Provider modes are `disabled`, `test`, and `live`; use test credentials locally and store deployed secrets in AWS Secrets Manager. Checkout amounts are always loaded server-side and expressed as integer paise in `*_subunits` fields.
+Flyway creates the schema on first start. SMS messages are printed to the log (`SMS_PROVIDER=log`);
+the phone-verification link is in that log line.
 
-For the complete three-container workflow and API reference, start with the [infrastructure repository](https://github.com/kvsram/creator-link-store-infrastructure). Its bootstrap script clones all missing siblings, validates the laptop, starts the three containers, and runs the supported-contract smoke test. Its feature-parity matrix is the source of truth for what is complete versus a route/schema foundation.
+## Verify
 
-## Regional Kubernetes deployment
+```bash
+mvn verify
+```
 
-`deploy/overlays/region-a`, `region-b`, and `region-c` target three independent Kubernetes clusters. Each deploys one API replica initially, with an HPA that can grow to three replicas in that region. The application remains stateless; PostgreSQL is an external managed service, not a Pod in every cluster.
+Runs the unit tests, the architecture rules (`ArchitectureTest`, the module boundaries from HANDOFF.md),
+and `AuthFlowIntegrationTest`, which boots the application against PostgreSQL 16 in Docker and walks
+signup → SMS link → confirm → login → profile → refresh rotation → reuse detection → logout → admin login
+→ lockout over HTTP. The same command is the pull-request gate in GitHub Actions.
 
-Create the `creator-store-db` Secret in each cluster using its private managed-PostgreSQL endpoint. It is deliberately not generated from the placeholder template by Kustomize. For the first low-scale phase, use one active writer region and keep another region warm; the current API has no read/write datasource split and arbitrary cross-region writes are unsafe. Do not commit a real database password: create the Secret through External Secrets or an equivalent cloud secret-manager integration.
+## Layout
 
-The integration ConfigMap deliberately keeps `PAYMENTS_MODE` and `INSTAGRAM_MODE` disabled. Create `creator-store-runtime-secrets` through External Secrets before switching a stage to `test`. `deploy/base/integration-secret.template.yaml` documents names only and is intentionally excluded from Kustomize.
+```
+src/main/java/com/creatorstore/
+  common/ config/ security/        shared: errors, properties, JWT, security filter chain
+  creator/ auth/ verification/     built: accounts, sessions, phone verification
+  notification/ admin/             built: SMS/email adapter, admin login and bootstrap
+  product/ booking/ storefront/ automation/ customer/ order/ payment/ support/
+                                   planned; each package-info.java states what it will own
+src/main/resources/db/migration/   Flyway migrations (V1 = auth schema)
+docs/planned-schema.sql            agreed tables for the planned modules (verified on PostgreSQL 16)
+docs/legacy/                       the earlier prototype's schema and README, kept as reference input
+```
 
-GitHub Actions builds an immutable GHCR image on every `main` push. Manual promotion uses protected GitHub Environments `dev`, `preprod`, and `prod`, short-lived AWS OIDC credentials, and a self-hosted runner labeled `aws-private` that can reach the private EKS API. Configure the regional variables documented in the infrastructure repository and trigger **Deploy backend** with the exact 40-character image commit SHA. No kubeconfig is stored in GitHub.
+## Delivery
+
+Pull requests run the quality gate. Commits on `main` build an immutable image
+`ghcr.io/kvsram/creator-link-store-backend:sha-<commit>`. Deployment to AWS (ECS Fargate, one region)
+is the next story in the delivery plan and lives in the infrastructure repository.

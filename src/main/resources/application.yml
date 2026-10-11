@@ -1,33 +1,55 @@
-server:
-  port: ${PORT:8080}
 spring:
+  application:
+    name: creatorstore
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/creatorstore}
-    username: ${DB_USER:creator}
-    password: ${DB_PASSWORD:creator}
-  sql:
-    init:
-      mode: always
-  jdbc:
-    template:
-      query-timeout: 5
-payments:
-  mode: ${PAYMENTS_MODE:disabled}
-  default-provider: ${PAYMENTS_DEFAULT_PROVIDER:razorpay}
-  success-url: ${PAYMENTS_SUCCESS_URL:http://localhost:3000/alex?checkout=success}
-  cancel-url: ${PAYMENTS_CANCEL_URL:http://localhost:3000/alex?checkout=cancelled}
-  razorpay:
-    key-id: ${RAZORPAY_KEY_ID:}
-    key-secret: ${RAZORPAY_KEY_SECRET:}
-    webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
-  stripe:
-    secret-key: ${STRIPE_SECRET_KEY:}
-    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
-instagram:
-  mode: ${INSTAGRAM_MODE:disabled}
-  graph-api-version: ${INSTAGRAM_GRAPH_API_VERSION:v23.0}
-  account-id: ${INSTAGRAM_ACCOUNT_ID:}
-  access-token: ${INSTAGRAM_ACCESS_TOKEN:}
-  app-secret: ${INSTAGRAM_APP_SECRET:}
-  verify-token: ${INSTAGRAM_VERIFY_TOKEN:}
-  test-recipient-ids: ${INSTAGRAM_TEST_RECIPIENT_IDS:}
+    username: ${DB_USER:creatorstore}
+    password: ${DB_PASSWORD:creatorstore}
+    hikari:
+      maximum-pool-size: 10
+
+  jpa:
+    hibernate:
+      ddl-auto: validate        # Flyway owns the schema; Hibernate only checks that entities match it
+    open-in-view: false         # no lazy loading in controllers; transactions end in the service layer
+
+  flyway:
+    enabled: true
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: never
+    include-stacktrace: never
+
+logging:
+  level:
+    com.creatorstore: INFO
+
+app:
+  base-url: ${APP_BASE_URL:http://localhost:3000}   # frontend URL used in SMS links
+
+  jwt:
+    secret: ${JWT_SECRET}                            # REQUIRED. At least 32 characters. Never commit it.
+    issuer: creatorstore
+    access-token-ttl: 15m
+    admin-access-token-ttl: 8h
+    refresh-token-ttl: 30d
+
+  login:
+    max-failed-attempts: 5
+    lock-duration: 15m
+
+  verification:
+    link-ttl: 30m
+    max-links-per-phone-per-hour: 3
+
+  sms:
+    provider: ${SMS_PROVIDER:log}                    # "log" prints the SMS to the console (dev). Add real providers later.
+
+  admin:
+    bootstrap:
+      email: ${ADMIN_BOOTSTRAP_EMAIL:}               # set these once to create the first SUPER_ADMIN
+      password: ${ADMIN_BOOTSTRAP_PASSWORD:}
+      full-name: ${ADMIN_BOOTSTRAP_NAME:Platform Admin}

@@ -1,14 +1,39 @@
+# Local development: `docker compose up -d db` then `mvn spring-boot:run`,
+# or `docker compose up --build` to run the API in a container too.
 services:
   db:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: creatorstore
-      POSTGRES_USER: creator
-      POSTGRES_PASSWORD: creator
+      POSTGRES_USER: creatorstore
+      POSTGRES_PASSWORD: creatorstore
     ports:
       - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U creator -d creatorstore"]
+      test: ["CMD-SHELL", "pg_isready -U creatorstore -d creatorstore"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/creatorstore
+      DB_USER: creatorstore
+      DB_PASSWORD: creatorstore
+      # Development-only values. Production secrets live in AWS Secrets Manager.
+      JWT_SECRET: local-development-secret-at-least-32-characters-long
+      ADMIN_BOOTSTRAP_EMAIL: admin@example.test
+      ADMIN_BOOTSTRAP_PASSWORD: local-admin-password-123
+      APP_BASE_URL: http://localhost:3000
+      SMS_PROVIDER: log
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:

@@ -1,3 +1,0 @@
-resources: [../../base]
-namespace: creator-store
-labels: [{ pairs: { topology.creator-store/region: region-c } }]
