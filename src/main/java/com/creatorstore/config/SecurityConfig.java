@@ -37,7 +37,7 @@ import java.util.Set;
  * Everything else under /api needs a valid Bearer token:
  *   /api/admin/**  -> ROLE_ADMIN  (JWT claim role=ADMIN; admin_role adds ROLE_SUPER_ADMIN | ROLE_SUPPORT | ROLE_FINANCE)
  *   /api/**        -> ROLE_CREATOR
- * Anything outside /api (except /error) is denied.
+ * Anything outside /api (except /error and the public health probe) is denied.
  */
 @Configuration
 @EnableWebSecurity
@@ -53,7 +53,12 @@ public class SecurityConfig {
             "/api/admin/auth/login");
 
     static final Set<String> PUBLIC_GET_PATHS = Set.of(
-            "/api/auth/username-availability");
+            "/api/auth/username-availability",
+            // Health is public so Docker Compose, the smoke test and the load balancer can probe it.
+            // It reports only UP/DOWN (management.endpoint.health.show-details=never).
+            "/actuator/health",
+            "/actuator/health/liveness",
+            "/actuator/health/readiness");
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,

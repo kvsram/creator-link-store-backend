@@ -81,6 +81,17 @@ class AuthFlowIntegrationTest {
     static String refreshToken;
 
     @Test
+    @Order(0)
+    void healthIsPublicAndSaysOnlyUp() {
+        Map health = get("/actuator/health");
+        assertEquals("UP", health.get("status"));
+        assertFalse(health.containsKey("components"), "health must not leak component details");
+        assertEquals(HttpStatus.OK, http.getForEntity("/actuator/health/readiness", Map.class).getStatusCode());
+        // the rest of the actuator stays closed
+        assertEquals(HttpStatus.UNAUTHORIZED, http.getForEntity("/actuator/env", Map.class).getStatusCode());
+    }
+
+    @Test
     @Order(1)
     void usernameAvailabilityIsCaseInsensitiveAndRejectsReservedNames() {
         assertEquals(true, get("/api/auth/username-availability?username=SkinGlow").get("available"));
