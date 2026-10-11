@@ -1,7 +1,30 @@
 # HANDOFF — read this first
 
 This file is written for whoever (human or LLM) continues this codebase. It states what exists,
-what the rules are, and what to build next. Keep it updated when you add a module.
+what the rules are, and what to build next. Keep it updated when you add a module or finish a story.
+
+## 0. How to start a session
+
+Chat context runs out; this repository does not. Every session, in any tool, starts the same way.
+
+**Claude Code on the laptop** (recommended for coding stories: it compiles, runs the tests and pushes directly):
+
+```bash
+cd ~/workspace/github.com/kvsram/creator-link-store-backend
+git checkout main && git pull
+claude
+```
+
+`CLAUDE.md` is read automatically. First message: `Story E0.5. Plan first, then build it in small commits.`
+
+**A claude.ai chat** (design discussions, cost reviews, planning; it does not read `CLAUDE.md` by itself).
+First message, with the repo attached or linked:
+
+> Read `CLAUDE.md`, `HANDOFF.md` sections 0 to 2b and `docs/design/03-delivery-plan.md` section 5 in
+> `kvsram/creator-link-store-backend`. Then work on story `<ID>` following `CLAUDE.md`.
+
+**What a session leaves behind:** a pull request (one story), the story's row in section 2b updated,
+`docs/design/` edited if the design changed. Nothing important stays only in the chat.
 
 ## 1. What this is
 
@@ -38,6 +61,23 @@ Stack: Java 21, Spring Boot 3.5, Spring Data JPA (Hibernate), Flyway, PostgreSQL
 The planned tables for the unstarted modules are sketched in `docs/planned-schema.sql`.
 They are a starting point, not a contract: adjust them when you implement the module.
 
+### 2b. Delivery status (story IDs from `docs/design/03-delivery-plan.md` section 5)
+
+Update this table in the pull request that finishes a story. One row per story started; stories not
+listed are not started.
+
+| Story | What | Status | Where |
+| --- | --- | --- | --- |
+| E0.1 | Modular monolith replaces the prototype; `mvn verify` green | done | PR #2 |
+| E0.2 | Quality gate on every PR (unit + Testcontainers + ArchUnit + Trivy report); image build on main | done | PR #2, `.github/workflows/` |
+| E0.3 | AWS bootstrap: state bucket, OIDC provider, deploy roles, budget alarm | not started (owner runs it) | infrastructure repo |
+| E0.4 | Terraform dev environment (VPC, RDS, Redis, ECR, Secrets Manager, ALB, ECS Fargate) | not started | infrastructure repo |
+| E0.5 | Deploy-dev workflow with smoke test and rollback | not started, needs E0.4 | this repo |
+| E0.6 | Frontend restart (Vite + React + Router + auth store) | not started | frontend repo |
+| E0.8 | Local environment: compose with Redis, seed data, `make smoke` | partly: compose has db + api, no Redis, no seed | this repo |
+
+Next story that needs no AWS account: **E0.8**. Next story on the critical path: **E0.3** (owner), then E0.4.
+
 ### Verification state of the delivered code
 
 - `src/main/resources/db/migration/V1__auth_schema.sql` was applied to a real PostgreSQL 16 and
@@ -46,10 +86,10 @@ They are a starting point, not a contract: adjust them when you implement the mo
 - `AuthFlowIntegrationTest` boots the application against PostgreSQL 16 (Testcontainers) and walks
   every built flow over HTTP; `ArchitectureTest` (ArchUnit) enforces the module rules below.
   Both run in `mvn verify`, locally and in the pull-request gate.
-- The Java was written against Spring Boot 3.5 / Spring Security 6.5 / Hibernate 6.6 APIs. The first
-  CI run on the pull request is its first compile; expect small fixes, not design changes. If Hibernate's
-  schema validation (`ddl-auto: validate`) complains about `timestamptz` columns, set
-  `spring.jpa.hibernate.ddl-auto: none` — Flyway owns the schema either way.
+- `mvn verify` is green locally (macOS, Docker Desktop) and in GitHub Actions: four test classes
+  (`NormalizerTest`, `JwtServiceTest`, `ArchitectureTest`, `AuthFlowIntegrationTest`). Testcontainers is
+  pinned to 1.21.4 in `pom.xml` because Docker Engine 29 rejects the older client API version that
+  Boot 3.5.6 manages.
 
 ### History
 
