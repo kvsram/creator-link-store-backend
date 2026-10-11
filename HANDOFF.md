@@ -74,9 +74,9 @@ listed are not started.
 | E0.4 | Terraform dev environment (VPC, RDS, Redis, ECR, Secrets Manager, ALB, ECS Fargate) | not started | infrastructure repo |
 | E0.5 | Deploy-dev workflow with smoke test and rollback | not started, needs E0.4 | this repo |
 | E0.6 | Frontend restart (Vite + React + Router + auth store) | not started | frontend repo |
-| E0.8 | Local environment: compose with Redis, seed data, `make smoke` | partly: compose has db + api, no Redis, no seed | this repo |
+| E0.8 | Local environment: compose with Redis, demo seed, `make smoke`, public health endpoint | done | PR #3, `Makefile`, `scripts/smoke.sh`, `local/DevSeed` |
 
-Next story that needs no AWS account: **E0.8**. Next story on the critical path: **E0.3** (owner), then E0.4.
+Next story on the critical path: **E0.3** (owner runs the one-time AWS bootstrap), then E0.4, E0.5.
 
 ### Verification state of the delivered code
 
@@ -99,24 +99,16 @@ else from it is used.
 
 ## 3. How to run
 
-```bash
-# 1. PostgreSQL (any 14+); defaults match application.yml
-createuser creatorstore -P        # password: creatorstore
-createdb -O creatorstore creatorstore
+`make up` (containers: PostgreSQL, Redis, API with the demo seed), `make smoke` (end-to-end check),
+`make db` + `make run` (API from source), `make verify` (= `mvn verify`). See the README for the demo accounts.
 
-# 2. Required environment
-export JWT_SECRET='change-me-to-a-random-string-of-at-least-32-characters'
-# optional: creates the first SUPER_ADMIN on first start, then remove them
-export ADMIN_BOOTSTRAP_EMAIL=admin@example.com
-export ADMIN_BOOTSTRAP_PASSWORD='at-least-12-characters'
-
-# 3. Build and run
-mvn -q verify
-mvn spring-boot:run
-```
+Required environment for the API: `JWT_SECRET` (32+ characters). Optional: `ADMIN_BOOTSTRAP_EMAIL` /
+`ADMIN_BOOTSTRAP_PASSWORD` create the first SUPER_ADMIN on first start. `SPRING_PROFILES_ACTIVE=local`
+turns on `local/DevSeed` (demo creator) and DEBUG logs; never set it in the cloud.
 
 Flyway creates the schema on first start. SMS messages are printed to the log
-(`app.sms.provider=log`); the verification link is in that log line.
+(`app.sms.provider=log`); the verification link is in that log line. `GET /actuator/health` is the only
+public actuator endpoint and reports only UP/DOWN.
 
 ## 4. The rules every module follows
 
@@ -218,6 +210,7 @@ counter) → on success reset counters, create a refresh-token family, issue a 1
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
+| GET  | `/actuator/health` | public | UP/DOWN for Compose, smoke test, load balancer |
 | GET  | `/api/auth/username-availability?username=` | public | live check while typing |
 | POST | `/api/auth/signup` | public | create account (+ send SMS link if phone given) |
 | POST | `/api/auth/login` | public | access + refresh token |

@@ -23,6 +23,19 @@ server:
     include-message: never
     include-stacktrace: never
 
+# Actuator: only the health endpoint is exposed, and it says only UP or DOWN (no component details,
+# no datasource URLs). /actuator/health/liveness and /readiness exist for the container platform.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+
 logging:
   level:
     com.creatorstore: INFO

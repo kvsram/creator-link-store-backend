@@ -4,30 +4,30 @@ Spring Boot modular monolith for the Creator Link Store platform: creators sell 
 courses and bookings from a link-in-bio page; Instagram keyword auto-DMs send followers a personalised link.
 
 **Start with [HANDOFF.md](HANDOFF.md).** It holds the module rules, what is implemented, and what to build next.
-The design this code follows is the "Creator Store — High-Level Design" document (launch design, distributed
-design and delivery plan).
+The design this code follows is in [`docs/design/`](docs/design/) (launch design, distributed design, delivery plan).
 
-## Run locally
+## Quick start
 
-Requirements: Java 21, Maven 3.9, Docker.
+Requirements: Docker Desktop, Java 21, Maven 3.9.
 
 ```bash
-docker compose up -d db
-export JWT_SECRET='any-random-string-of-at-least-32-characters'
-export ADMIN_BOOTSTRAP_EMAIL=admin@example.test
-export ADMIN_BOOTSTRAP_PASSWORD='local-admin-password-123'
-mvn spring-boot:run                 # http://localhost:8080
+make up        # PostgreSQL 16 + Redis 7 + the API (built from this checkout) with a demo creator and admin
+make smoke     # signup -> login -> profile -> refresh -> logout -> admin login against localhost:8080
+make logs      # follow the API log; SMS verification links are printed there
+make down      # stop (keeps the database volume); `make clean` removes it
 ```
 
-Or everything in containers: `docker compose up --build`.
+Demo accounts (local only): creator `demo` / `demo-password-123`, admin `admin@example.test` /
+`local-admin-password-123`. `make` alone lists every target.
 
-Flyway creates the schema on first start. SMS messages are printed to the log (`SMS_PROVIDER=log`);
-the phone-verification link is in that log line.
+To run the API from source (or from the IDE) against the containers: `make db`, then `make run`.
+The `local` Spring profile turns on the demo seed (`DevSeed`) and DEBUG logging; it is never set in the cloud.
+Health: `GET /actuator/health` returns `{"status":"UP"}` and nothing else.
 
 ## Verify
 
 ```bash
-mvn verify
+make verify    # = mvn verify
 ```
 
 Runs the unit tests, the architecture rules (`ArchitectureTest`, the module boundaries from HANDOFF.md),
